@@ -56,7 +56,11 @@ DEFAULT_CLOUD_STT_MODEL = "whisper-1"
 DEFAULT_CLOUD_LLM_MODEL = "gpt-4o-mini"
 FALLBACK_LANGUAGES = {"fa": "Persian", "en": "English"}  # used before/without a server round-trip
 MAX_STT_SLOTS = 3  # mirrors the orchestrator's MAX_STT_SLOTS — multi-STT instructions (e.g. radiology)
-LOCAL_LLM_MODELS = ["aya-expanse", "gemma4:e4b", "gemma4:31b"]  # Ollama tags available on Core_LLM
+LOCAL_LLM_MODELS = ["aya-expanse", "aya-expanse:32b", "gemma4:e4b", "gemma4:31b"]  # Ollama tags available on Core_LLM
+# Core_LLM's one local audio-capable model (config.MULTIMODAL_MODEL_ID), served via
+# /chat_audio (not Ollama). Used for display/filenames only -- Orchestrator's local-vs-
+# cloud dispatch just checks for an "openai:"/"gemini:" prefix, not this literal string.
+LOCAL_MULTIMODAL_MODEL_NAME = "gemma-4-E4B-it"
 
 # The Orchestrator's per-instruction STT pipeline choice: transcribe with our
 # own STT-slot pipeline first (default), or skip STT and feed the audio
@@ -954,6 +958,12 @@ class OrchestratorTab(ttk.Frame):
             if model.startswith("openai:") or model.startswith("gemini:"):
                 return model
             return "openai:" + model
+        if self._is_multimodal():
+            # llm_local_box (and whatever Ollama tag it holds) is hidden in this
+            # combination — report the model that's actually running instead of
+            # a stale/irrelevant dropdown value, so the session display and
+            # saved-transcript filename reflect reality.
+            return LOCAL_MULTIMODAL_MODEL_NAME
         return self.llm_local_model.get().strip()
 
     def refresh_models(self):
