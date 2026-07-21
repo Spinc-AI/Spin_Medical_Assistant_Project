@@ -62,7 +62,8 @@ LLM_URL = os.getenv("LLM_URL", "http://localhost:8001").rstrip("/")
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "9000"))
-HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "120"))
+HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "600"))  # a large local model (e.g. aya-expanse:32b,
+# gemma4:31b) reconciling a BuAli report can genuinely take several minutes -- 120s was too short.
 
 # External ("api") provider fallback defaults — used only when a request
 # doesn't supply its own credentials. Only OpenAI-compatible APIs are

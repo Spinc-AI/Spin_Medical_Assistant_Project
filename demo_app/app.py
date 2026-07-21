@@ -44,7 +44,11 @@ except Exception as exc:  # missing PortAudio / no audio device — keep the app
 
 DEFAULT_HOST = "94.184.177.150"
 TIMEOUT_SHORT = 15
-TIMEOUT_LOAD = 300   # model loading / inference can be slow
+TIMEOUT_LOAD = 900   # model loading / inference can be slow -- must exceed Orchestrator's own
+                      # internal HTTP_TIMEOUT (see Orchestrator/.env), or this becomes the
+                      # bottleneck instead: a big local model (e.g. aya-expanse:32b) can take
+                      # several minutes to reconcile a BuAli report, and Orchestrator's timeout
+                      # to Core_LLM needs raising to match (default 120s is too short for that).
 AUDIO_FILETYPES = [("Audio files", "*.wav *.mp3 *.flac *.ogg *.m4a"), ("All files", "*.*")]
 MIC_SAMPLE_RATE = 16000  # matches the STT service's target rate
 
