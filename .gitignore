@@ -1,0 +1,43 @@
+# Root .gitignore — universal rules applied across the whole repo, every branch.
+# Module-specific rules still live in each module's own .gitignore
+# (e.g. Module_Speech_To_Text/.gitignore for its deployment wav/model rules).
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+
+# --- Model weights (download locally, never commit) ---
+*.pt
+*.pth
+*.bin
+*.h5
+*.onnx
+*.ckpt
+*.gguf
+*.safetensors
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

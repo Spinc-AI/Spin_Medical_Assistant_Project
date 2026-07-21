@@ -1,0 +1,36 @@
+# Module_Speech_To_Text  (paths are relative to this module's root)
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Model weights (download locally, don't commit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.onnx
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- deployment service ---
+# Runtime model cache + stray audio dropped into the service,
+# but keep the curated sample clips that are part of the repo.
+# NOTE: do NOT ignore *.wav globally — benchmark/ and demo/ wavs are committed fixtures.
+deployment/models/
+deployment/**/*.wav
+!deployment/samples/*.wav

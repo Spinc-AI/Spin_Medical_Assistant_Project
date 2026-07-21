@@ -1,0 +1,86 @@
+{
+  "id": "02_radiology_report_assist_stt",
+  "name": "BuAli",
+  "version": "0.4.0",
+  "description": "Two ways to turn a spoken radiology report into a corrected transcript: (stt_mode=separate, default) up to three independently-configurable STT engines transcribe the audio and an LLM reconciles whichever transcripts were produced; (stt_mode=multimodal) STT is skipped entirely and an audio-capable LLM (local Gemma 4 E4B via Core_LLM, or a cloud model) is given the audio directly.",
+  "input": {
+    "accepts": ["audio"],
+    "note": "Audio only. stt_mode=separate (default): up to 3 independently configured STT slots (each local or cloud); at least 1 must be configured, unconfigured slots are skipped. stt_mode=multimodal: no STT slots needed -- audio goes straight to llm_model. A plain (non-prefixed) llm_model routes to Core_LLM's local audio-capable model (Gemma 4 E4B); 'openai:<model>' or 'gemini:<model>' routes to that cloud provider instead. Accepted audio formats depend on the provider (wav/mp3 for openai:, a wider set for gemini:/local)."
+  },
+  "models": [
+    {"role": "stt_slot_1", "module": "local_or_external", "required_when": "configured, stt_mode=separate", "load": "per-step"},
+    {"role": "stt_slot_2", "module": "local_or_external", "required_when": "configured, stt_mode=separate", "load": "per-step"},
+    {"role": "stt_slot_3", "module": "local_or_external", "required_when": "configured, stt_mode=separate", "load": "per-step"},
+    {"role": "llm", "module": "Core_LLM_or_external_api", "required_when": "always", "load": true, "unload_after": true}
+  ],
+  "steps": [
+    {
+      "id": 1,
+      "name": "transcribe_slot_1",
+      "run_when": "always",
+      "run_when_stt_mode": ["separate"],
+      "use": "stt_slot",
+      "slot": 0,
+      "endpoint": "our STT service or an external STT API, per stt_slots[0]",
+      "input": "audio",
+      "output": "transcript_1"
+    },
+    {
+      "id": 2,
+      "name": "transcribe_slot_2",
+      "run_when": "always",
+      "run_when_stt_mode": ["separate"],
+      "use": "stt_slot",
+      "slot": 1,
+      "endpoint": "our STT service or an external STT API, per stt_slots[1]",
+      "input": "audio",
+      "output": "transcript_2"
+    },
+    {
+      "id": 3,
+      "name": "transcribe_slot_3",
+      "run_when": "always",
+      "run_when_stt_mode": ["separate"],
+      "use": "stt_slot",
+      "slot": 2,
+      "endpoint": "our STT service or an external STT API, per stt_slots[2]",
+      "input": "audio",
+      "output": "transcript_3"
+    },
+    {
+      "id": 4,
+      "name": "reconcile",
+      "run_when": "always",
+      "run_when_stt_mode": ["separate"],
+      "use": "llm",
+      "endpoint": "Core_LLM POST /chat, or an external LLM API",
+      "inputs": ["transcript_1", "transcript_2", "transcript_3"],
+      "input_labels": {
+        "transcript_1": "STT engine 1 transcript",
+        "transcript_2": "STT engine 2 transcript",
+        "transcript_3": "STT engine 3 transcript"
+      },
+      "include_in_output": ["transcript_1", "transcript_2", "transcript_3"],
+      "template": "report_template.json",
+      "system_prompt": "You are a radiology transcription QA assistant. You will be given up to three independent transcriptions of the SAME spoken radiology report, each produced by a different speech-to-text engine (local or cloud) -- not all three may be present. They may disagree in places due to transcription errors. Produce THREE outputs, each strictly grounded in what the transcripts actually contain -- never invent, assume, or add findings, measurements, sections, or typical/expected report boilerplate that isn't supported by the transcripts:\n1. raw_transcript: your best reconstruction of literally what was said, resolving disagreements between the engines by picking whichever wording is most plausible given radiology context -- do not clean up phrasing, do not reformat, do not restructure.\n2. corrected_transcript: the same content as raw_transcript with minimal fixes only -- correct obvious transcription/terminology mistakes and light punctuation, but keep the same order, content, and level of completeness. Do not restructure into report sections.\n3. final_text: an understanding/conclusion of corrected_transcript's content -- it may be organized or formatted differently, but must ONLY reflect what corrected_transcript actually says. If the transcript is incomplete, fragmentary, or doesn't cover a full radiology report, leave those gaps alone -- do NOT fill them in with typical/expected findings. It's fine for final_text to be short or incomplete if that's what the source supports.\nAlso list the discrepancies you resolved between engines (discrepancies_found) and any relevant notes. Respond with JSON only, matching the template.",
+      "output": "result"
+    },
+    {
+      "id": 5,
+      "name": "transcribe_and_report_directly",
+      "run_when": "always",
+      "run_when_stt_mode": ["multimodal"],
+      "use": "llm_audio",
+      "endpoint": "Core_LLM POST /chat_audio (local Gemma 4 E4B), or an external audio-capable LLM API (OpenAI-compatible audio-preview-class model, or a Gemini model via generateContent) -- no STT service involved",
+      "input": "audio",
+      "template": "report_template.json",
+      "system_prompt": "You are a radiology transcription assistant. You are given an audio recording of a SPOKEN radiology report -- listen to it directly. Produce THREE outputs, each strictly grounded in what is actually said in the audio -- never invent, assume, or add findings, measurements, sections, or typical/expected report boilerplate that isn't supported by the audio:\n1. raw_transcript: a literal, verbatim transcription of the audio (disfluencies/false starts may be lightly smoothed only where clearly a slip of the tongue) -- no reformatting, no reorganizing.\n2. corrected_transcript: the same content as raw_transcript with minimal fixes only -- correct obvious mis-speaking, terminology, and light punctuation, but keep the same order, content, and level of completeness. Do not restructure into report sections.\n3. final_text: an understanding/conclusion of corrected_transcript's content -- it may be organized or formatted differently, but must ONLY reflect what corrected_transcript actually says. If the audio is incomplete, fragmentary, or doesn't cover a full radiology report, leave those gaps alone -- do NOT fill them in with typical/expected findings. It's fine for final_text to be short or incomplete if that's what the audio supports.\nList any relevant notes (notes; discrepancies_found should be an empty list here, there's only one source). Respond with JSON only, matching the template.",
+      "output": "result"
+    }
+  ],
+  "output": {
+    "type": "json",
+    "template": "report_template.json",
+    "note": "The final result also includes whichever transcript_N outputs were actually produced (unconfigured/skipped slots are simply absent), merged in by the orchestrator alongside the LLM's fields from report_template.json."
+  }
+}

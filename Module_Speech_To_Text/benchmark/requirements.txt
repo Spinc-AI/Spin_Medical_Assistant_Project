@@ -1,0 +1,28 @@
+# ──────────────────────── Persian STT benchmark (benchmark/) ──────────────────
+# Dependencies for the evaluation notebook (benchmark_kaggle.ipynb) and the
+# local test-set downloader (download_test_dataset.py).
+#
+# The notebook is meant to run on a Kaggle GPU, where torch/transformers/datasets
+# are already preinstalled — these are listed so the same run is reproducible
+# outside Kaggle too. Version pins are minimal, only where compatibility matters.
+
+# Model loading (same recent transformers the app needs)
+torch>=2.1
+transformers>=4.45        # Whisper large-v3-turbo + SeamlessM4T v2 need this floor
+accelerate>=0.26
+
+# Metrics
+jiwer                     # WER / CER
+hazm                      # Persian text normalization
+sacrebleu                 # chrF
+bert-score                # ParsBERT semantic F1
+sentence-transformers     # multilingual semantic similarity
+scikit-learn
+pandas
+
+# Dataset loading + local download helper (download_test_dataset.py)
+datasets
+pyarrow                   # read the FLEURS parquet shards
+huggingface_hub           # fetch dataset / model files from the Hub
+soundfile                 # decode clips to 16 kHz mono WAV
+# hf_xet                  # optional: faster, resumable Hub downloads

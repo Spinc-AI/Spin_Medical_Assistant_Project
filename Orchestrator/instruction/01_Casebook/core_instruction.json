@@ -1,0 +1,55 @@
+{
+  "id": "01_casebook",
+  "name": "Casebook",
+  "version": "0.1.0",
+  "description": "Fill a patient casebook form from an audio recording or a text conversation.",
+  "input": {
+    "accepts": [
+      "audio",
+      "text"
+    ],
+    "note": "If audio is given it is transcribed by STT first; if text is given, STT is skipped."
+  },
+  "models": [
+    {
+      "role": "stt",
+      "module": "STT",
+      "required_when": "input_is_audio",
+      "load": true,
+      "unload_after": true
+    },
+    {
+      "role": "llm",
+      "module": "Core_LLM",
+      "required_when": "always",
+      "load": true,
+      "unload_after": true
+    }
+  ],
+  "steps": [
+    {
+      "id": 1,
+      "name": "transcribe",
+      "run_when": "input_is_audio",
+      "use": "stt",
+      "endpoint": "POST /transcribe",
+      "input": "audio",
+      "output": "transcript"
+    },
+    {
+      "id": 2,
+      "name": "fill_casebook",
+      "run_when": "always",
+      "use": "llm",
+      "endpoint": "POST /chat",
+      "input": "transcript_or_text",
+      "template": "patient_template_01.json",
+      "system_prompt": "You are a clinical intake assistant. From the conversation, fill the patient casebook form. Only fill a field if the conversation clearly states it; if a value is not mentioned, leave it null. Never guess or invent patient information. Respond with JSON only, matching the template.",
+      "output": "filled_form"
+    }
+  ],
+  "output": {
+    "type": "json",
+    "template": "patient_template_01.json"
+  }
+}

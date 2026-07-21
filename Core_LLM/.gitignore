@@ -1,0 +1,23 @@
+# Core_LLM module
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Model weights (download locally, don't commit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf

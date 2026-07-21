@@ -1,0 +1,31 @@
+{
+  "patient": {
+    "full_name": null,
+    "age": null,
+    "gender": null,
+    "national_id": null,
+    "contact_number": null
+  },
+  "case": {
+    "chief_complaint": null,
+    "history_of_present_illness": null,
+    "symptoms": [],
+    "onset": null,
+    "duration": null,
+    "severity": null
+  },
+  "medical_background": {
+    "past_medical_history": null,
+    "current_medications": [],
+    "allergies": [],
+    "family_history": null
+  },
+  "vitals": {
+    "blood_pressure": null,
+    "heart_rate": null,
+    "temperature": null,
+    "respiratory_rate": null,
+    "oxygen_saturation": null
+  },
+  "notes": null
+}

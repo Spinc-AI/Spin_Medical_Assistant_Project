@@ -1,0 +1,11 @@
+model,0.0,5.0,10.0,15.0,20.0
+MohammadReza-Halakoo/persian-whisper-large-v3-10-percent-17-0-one-epoch,0.4964,0.3493,0.2688,0.2274,0.2087
+facebook/hf-seamless-m4t-medium,0.3196,0.1977,0.1615,0.1413,0.1412
+facebook/mms-1b-all,0.4892,0.3123,0.2363,0.1942,0.1754
+facebook/mms-1b-fl102,0.5159,0.3024,0.2185,0.1722,0.1558
+facebook/seamless-m4t-v2-large,0.2227,0.144,0.1247,0.1169,0.1156
+jonatasgrosman/wav2vec2-large-xlsr-53-persian,0.9036,0.678,0.4624,0.3449,0.2879
+nezamisafa/whisper-persian-v4,0.4044,0.2585,0.1899,0.1633,0.1461
+openai/whisper-large-v3,0.5491,0.3327,0.2679,0.2294,0.2106
+openai/whisper-large-v3-turbo,0.6152,0.3623,0.2838,0.2282,0.2131
+vhdm/whisper-large-fa-v1,0.49,0.309,0.2311,0.1873,0.1647

@@ -1,0 +1,20 @@
+# LLM client — Ollama exposes an OpenAI-compatible API, so we use the openai SDK
+openai>=1.30
+python-dotenv>=1.0
+
+# HTTP API layer (main.py) — lets the orchestrator call Core_LLM over HTTP
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-multipart   # multipart form parsing, needed for /chat_audio's UploadFile
+
+# Local multimodal (audio-capable) model — served directly via transformers,
+# not Ollama (Ollama doesn't support audio input yet). Needs a GPU with real
+# VRAM headroom (Gemma 4 E4B); install the CUDA build of torch, see
+# https://pytorch.org for the right command for your system.
+torch
+transformers        # needs a version with Gemma4 support (AutoModelForMultimodalLM) -- use latest
+accelerate           # for device_map="auto"
+soundfile
+librosa
