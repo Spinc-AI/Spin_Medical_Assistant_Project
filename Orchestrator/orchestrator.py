@@ -396,22 +396,22 @@ def llm_gemini_chat_audio(audio: bytes, audio_format: str, system_prompt: str, u
 
 
 def llm_local_chat_audio(audio: bytes, audio_format: str, system_prompt: str,
-                         user_text: Optional[str], filename: str = "audio.wav") -> str:
+                         user_text: Optional[str], model: Optional[str] = None,
+                         filename: str = "audio.wav") -> str:
     """Chat with our own (local) Core_LLM service's audio-capable model.
 
     Unlike the local *text* path (llm_chat -> /chat, Ollama-backed), this
     goes to Core_LLM's separate /chat_audio endpoint, served directly via
-    transformers -- Ollama doesn't support audio input. There's currently
-    only one local multimodal model, so no model name is passed; whatever
-    llm_model string the caller used is irrelevant here (any non-"openai:"/
-    "gemini:" model just means "use the local audio-capable model").
+    transformers -- Ollama doesn't support audio input. `model` picks which
+    of Core_LLM's registered local multimodal models to use (e.g.
+    "gemma-4-e4b", "qwen3-omni-30b" -- see GET /chat_audio/models on
+    Core_LLM); omitted, it falls back to Core_LLM's own configured default.
     """
+    data = {"system_prompt": system_prompt, "text": user_text or ""}
+    if model:
+        data["model"] = model
     with _client() as c:
-        r = c.post(
-            f"{LLM_URL}/chat_audio",
-            files={"file": (filename, audio)},
-            data={"system_prompt": system_prompt, "text": user_text or ""},
-        )
+        r = c.post(f"{LLM_URL}/chat_audio", files={"file": (filename, audio)}, data=data)
     if r.status_code != 200:
         raise RuntimeError(f"Local multimodal LLM call failed ({r.status_code}): {r.text}")
     return r.json()["reply"]
@@ -430,7 +430,7 @@ def llm_chat_audio(audio: bytes, audio_format: str, system_prompt: str, user_tex
                                   strip_api_prefix(model), response_format={"type": "json_object"},
                                   api_key=api_key, base_url=base_url)
     return llm_local_chat_audio(audio, audio_format, system_prompt, user_text,
-                                filename=f"audio.{audio_format}")
+                                model=model, filename=f"audio.{audio_format}")
 
 
 def chat(messages: list[dict], model: Optional[str], response_format: Optional[dict] = None,
@@ -617,9 +617,24 @@ def run_instruction(instruction: dict, *, audio: Optional[bytes], text: Optional
             system_prompt = (step.get("system_prompt", "")
                              + "\n\nJSON template to fill:\n"
                              + json.dumps(llm_template, ensure_ascii=False, indent=2))
+
+            # Hybrid mode: any transcript_N outputs already produced by earlier
+            # stt_slot steps are folded in as labeled reference transcripts,
+            # alongside the audio -- lets the LLM cross-check its own listening
+            # against another STT engine's opinion. In pure multimodal mode, no
+            # stt_slot steps ran, so this is empty and behaves as before.
+            reference_transcripts = [outputs[k] for k in sorted(outputs) if k.startswith("transcript_")]
+            user_text = text
+            if reference_transcripts:
+                labeled = "\n\n".join(
+                    f"Reference transcript {i + 1} (from a separate STT engine — may contain errors):\n{t}"
+                    for i, t in enumerate(reference_transcripts)
+                )
+                user_text = f"{user_text}\n\n{labeled}" if user_text else labeled
+
             try:
                 reply = llm_chat_audio(
-                    audio, audio_format, system_prompt, text, llm_model,
+                    audio, audio_format, system_prompt, user_text, llm_model,
                     api_key=llm_api_key, base_url=llm_base_url,
                 )
             except Exception as exc:
@@ -778,17 +793,35 @@ def start_session(req: SessionRequest):
         raise HTTPException(404, f"unknown instruction '{req.instruction}'")
     instruction = INSTRUCTIONS[req.instruction]
 
-    if req.stt_mode == "multimodal":
+    if req.stt_mode in ("multimodal", "hybrid"):
         if not instruction_uses(instruction, "llm_audio"):
             raise HTTPException(400, f"instruction '{req.instruction}' has no multimodal-LLM "
                                      "path (no 'llm_audio' step)")
         if not is_cloud_model(req.llm_model) and not llm_health():
             raise HTTPException(503, f"LLM server not reachable at {LLM_URL} (needed for the local "
                                      "multimodal model's /chat_audio endpoint)")
-        # No STT involved at all in this mode -- nothing to check/load here.
+
+        if req.stt_mode == "hybrid":
+            # Hybrid also needs at least one configured STT slot -- it's the
+            # reference transcript the LLM cross-checks its own listening
+            # against. Same slot validation as "separate" mode, below.
+            slots_needed = stt_slot_indices(instruction)
+            slots = req.stt_slots or []
+            if not any(idx < len(slots) and slots[idx] is not None for idx in slots_needed):
+                raise HTTPException(400, "hybrid mode needs at least one configured STT slot "
+                                         "(stt_slots) as a reference transcript for the LLM — use "
+                                         "'multimodal' instead if you don't want one")
+            if len(slots) > MAX_STT_SLOTS:
+                raise HTTPException(400, f"at most {MAX_STT_SLOTS} STT slots are supported")
+            any_local = any(not is_api_model(s.model) for s in slots if s is not None)
+            if any_local and not stt_health():
+                raise HTTPException(503, f"STT server not reachable at {STT_URL}")
+            # Local STT models are (re)loaded per-slot, per-step during /run — not here.
+
         SESSION = Session(instruction=req.instruction, stt_model=req.stt_model, llm_model=req.llm_model,
-                          language=req.language, llm_api_key=req.llm_api_key, llm_base_url=req.llm_base_url,
-                          stt_mode=req.stt_mode, stt_ready=True, llm_ready=True)
+                          language=req.language, stt_api_key=req.stt_api_key, stt_base_url=req.stt_base_url,
+                          llm_api_key=req.llm_api_key, llm_base_url=req.llm_base_url,
+                          stt_slots=req.stt_slots, stt_mode=req.stt_mode, stt_ready=True, llm_ready=True)
         return status()
 
     slots_needed = stt_slot_indices(instruction)

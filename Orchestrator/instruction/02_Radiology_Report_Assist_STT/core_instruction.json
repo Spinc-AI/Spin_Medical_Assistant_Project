@@ -1,11 +1,11 @@
 {
   "id": "02_radiology_report_assist_stt",
   "name": "BuAli",
-  "version": "0.4.0",
-  "description": "Two ways to turn a spoken radiology report into a corrected transcript: (stt_mode=separate, default) up to three independently-configurable STT engines transcribe the audio and an LLM reconciles whichever transcripts were produced; (stt_mode=multimodal) STT is skipped entirely and an audio-capable LLM (local Gemma 4 E4B via Core_LLM, or a cloud model) is given the audio directly.",
+  "version": "0.5.0",
+  "description": "Three ways to turn a spoken radiology report into a corrected transcript: (stt_mode=separate, default) up to three independently-configurable STT engines transcribe the audio and an LLM reconciles whichever transcripts were produced; (stt_mode=multimodal) STT is skipped entirely and an audio-capable LLM (local Gemma 4 E4B/Qwen3-Omni-30B via Core_LLM, or a cloud model) is given the audio directly; (stt_mode=hybrid) both at once -- STT slot(s) run AND the audio-capable LLM hears the audio itself, with the STT transcript(s) given to it as reference/reality-check material alongside its own listening.",
   "input": {
     "accepts": ["audio"],
-    "note": "Audio only. stt_mode=separate (default): up to 3 independently configured STT slots (each local or cloud); at least 1 must be configured, unconfigured slots are skipped. stt_mode=multimodal: no STT slots needed -- audio goes straight to llm_model. A plain (non-prefixed) llm_model routes to Core_LLM's local audio-capable model (Gemma 4 E4B); 'openai:<model>' or 'gemini:<model>' routes to that cloud provider instead. Accepted audio formats depend on the provider (wav/mp3 for openai:, a wider set for gemini:/local)."
+    "note": "Audio only. stt_mode=separate (default): up to 3 independently configured STT slots (each local or cloud); at least 1 must be configured, unconfigured slots are skipped. stt_mode=multimodal: no STT slots needed -- audio goes straight to llm_model. stt_mode=hybrid: needs at least 1 configured STT slot (same as separate) AND an audio-capable llm_model (same as multimodal) -- the LLM gets both the audio and the STT slot(s)' transcript(s). A plain (non-prefixed) llm_model routes to Core_LLM's local audio-capable model (gemma-4-e4b by default, or qwen3-omni-30b -- Core_LLM's best option for Persian); 'openai:<model>' or 'gemini:<model>' routes to that cloud provider instead. Accepted audio formats depend on the provider (wav/mp3 for openai:, a wider set for gemini:/local)."
   },
   "models": [
     {"role": "stt_slot_1", "module": "local_or_external", "required_when": "configured, stt_mode=separate", "load": "per-step"},
@@ -18,7 +18,7 @@
       "id": 1,
       "name": "transcribe_slot_1",
       "run_when": "always",
-      "run_when_stt_mode": ["separate"],
+      "run_when_stt_mode": ["separate", "hybrid"],
       "use": "stt_slot",
       "slot": 0,
       "endpoint": "our STT service or an external STT API, per stt_slots[0]",
@@ -29,7 +29,7 @@
       "id": 2,
       "name": "transcribe_slot_2",
       "run_when": "always",
-      "run_when_stt_mode": ["separate"],
+      "run_when_stt_mode": ["separate", "hybrid"],
       "use": "stt_slot",
       "slot": 1,
       "endpoint": "our STT service or an external STT API, per stt_slots[1]",
@@ -40,7 +40,7 @@
       "id": 3,
       "name": "transcribe_slot_3",
       "run_when": "always",
-      "run_when_stt_mode": ["separate"],
+      "run_when_stt_mode": ["separate", "hybrid"],
       "use": "stt_slot",
       "slot": 2,
       "endpoint": "our STT service or an external STT API, per stt_slots[2]",
@@ -69,12 +69,13 @@
       "id": 5,
       "name": "transcribe_and_report_directly",
       "run_when": "always",
-      "run_when_stt_mode": ["multimodal"],
+      "run_when_stt_mode": ["multimodal", "hybrid"],
       "use": "llm_audio",
-      "endpoint": "Core_LLM POST /chat_audio (local Gemma 4 E4B), or an external audio-capable LLM API (OpenAI-compatible audio-preview-class model, or a Gemini model via generateContent) -- no STT service involved",
+      "endpoint": "Core_LLM POST /chat_audio (local gemma-4-e4b or qwen3-omni-30b), or an external audio-capable LLM API (OpenAI-compatible audio-preview-class model, or a Gemini model via generateContent) -- no STT service involved for the audio understanding itself, but in hybrid mode the orchestrator also folds in any transcript_N outputs (from stt_slot steps) as reference text alongside the audio",
       "input": "audio",
+      "include_in_output": ["transcript_1", "transcript_2", "transcript_3"],
       "template": "report_template.json",
-      "system_prompt": "You are a radiology transcription assistant. You are given an audio recording of a SPOKEN radiology report -- listen to it directly. Produce THREE outputs, each strictly grounded in what is actually said in the audio -- never invent, assume, or add findings, measurements, sections, or typical/expected report boilerplate that isn't supported by the audio:\n1. raw_transcript: a literal, verbatim transcription of the audio (disfluencies/false starts may be lightly smoothed only where clearly a slip of the tongue) -- no reformatting, no reorganizing.\n2. corrected_transcript: the same content as raw_transcript with minimal fixes only -- correct obvious mis-speaking, terminology, and light punctuation, but keep the same order, content, and level of completeness. Do not restructure into report sections.\n3. final_text: an understanding/conclusion of corrected_transcript's content -- it may be organized or formatted differently, but must ONLY reflect what corrected_transcript actually says. If the audio is incomplete, fragmentary, or doesn't cover a full radiology report, leave those gaps alone -- do NOT fill them in with typical/expected findings. It's fine for final_text to be short or incomplete if that's what the audio supports.\nList any relevant notes (notes; discrepancies_found should be an empty list here, there's only one source). Respond with JSON only, matching the template.",
+      "system_prompt": "You are a radiology transcription assistant. You are given an audio recording of a SPOKEN radiology report -- listen to it directly. You may ALSO be given one or more reference transcripts of the same audio, produced separately by other speech-to-text engines -- if so, treat them only as supporting evidence to cross-check against, NOT ground truth (they may themselves contain transcription errors); your own listening is the primary source of truth, and where they disagree with what you hear, trust what you hear unless the reference transcript resolves a genuine ambiguity. Produce THREE outputs, each strictly grounded in what is actually said in the audio -- never invent, assume, or add findings, measurements, sections, or typical/expected report boilerplate that isn't supported by the audio (or by the reference transcripts, if given):\n1. raw_transcript: a literal, verbatim transcription of the audio (disfluencies/false starts may be lightly smoothed only where clearly a slip of the tongue) -- no reformatting, no reorganizing.\n2. corrected_transcript: the same content as raw_transcript with minimal fixes only -- correct obvious mis-speaking, terminology, and light punctuation, but keep the same order, content, and level of completeness. Do not restructure into report sections.\n3. final_text: an understanding/conclusion of corrected_transcript's content -- it may be organized or formatted differently, but must ONLY reflect what corrected_transcript actually says. If the audio is incomplete, fragmentary, or doesn't cover a full radiology report, leave those gaps alone -- do NOT fill them in with typical/expected findings. It's fine for final_text to be short or incomplete if that's what the audio supports.\nList any relevant notes (notes; discrepancies_found should be an empty list here unless you're specifically noting a disagreement with a reference transcript). Respond with JSON only, matching the template.",
       "output": "result"
     }
   ],

@@ -110,19 +110,24 @@ one) — their call shapes are too different to share one path:
 
 | `llm_model` | Provider shape | Example |
 |---|---|---|
-| *(no prefix)* | **Local** — Core_LLM's `POST /chat_audio`, serving Gemma 4 E4B directly via `transformers` (NOT Ollama — see below) | `"gemma4-e4b-multimodal"` (exact string is ignored; any non-prefixed value routes here) |
+| *(no prefix)* | **Local** — Core_LLM's `POST /chat_audio`, one of its registered models served directly via `transformers` (NOT Ollama — see below) | `"gemma-4-e4b"` or `"qwen3-omni-30b"` |
 | `openai:<model>` | OpenAI-compatible `POST /chat/completions` + `input_audio` content part | `"openai:gpt-4o-audio-preview"` |
 | `gemini:<model>` | Google's own `generateContent` API (`contents`/`parts`/`inline_data` + `systemInstruction`) | `"gemini:gemini-2.5-flash-preview-native-audio-dialog"` |
 
 **Why the local path isn't Ollama:** Ollama doesn't support audio input at
 all ([ollama/ollama#11798](https://github.com/ollama/ollama/issues/11798)),
-even though Gemma 4 E4B's own weights do. So Core_LLM runs a second, separate
-model-serving path just for this — `Core_LLM/deployment/multimodal.py` loads
-`google/gemma-4-E4B-it` directly via `transformers`' `AutoModelForMultimodalLM`
-+ `AutoProcessor` (mirrors the STT module's own model-loading pattern), and
-exposes it at `POST /chat_audio`. It's a lazy-loaded singleton — there's only
-one local multimodal model right now, so the `llm_model` string's exact
-content doesn't matter for this path, only that it lacks a cloud prefix.
+even though these models' own weights do. So Core_LLM runs a second, separate
+model-serving path just for this — `Core_LLM/deployment/multimodal.py` — with
+its own small registry (mirrors the STT module's swappable-model pattern,
+one model in memory at a time), exposed at `POST /chat_audio`. **The
+`llm_model` string here is the registry key that gets forwarded to Core_LLM**
+(unlike the old single-model version, it now matters which one you pick):
+
+| Key | Model | Notes |
+|---|---|---|
+| `gemma-4-e4b` (default) | `google/gemma-4-E4B-it` | Lighter, faster |
+| `qwen3-omni-30b` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | **Best tested option for Persian** — confirmed via [PARSA-Bench](https://arxiv.org/html/2603.14456), an independent Persian audio-LM benchmark (0.358 WER vs. 6-9 for Gemma-3n-class models). Needs real VRAM headroom. |
+
 This needs real GPU VRAM headroom; see `Core_LLM/deployment/requirements.txt`
 for the extra dependencies (`torch`, `transformers`, `accelerate`, etc.) this
 path pulls in beyond Core_LLM's normal Ollama-only footprint.
@@ -130,7 +135,8 @@ path pulls in beyond Core_LLM's normal Ollama-only footprint.
 Requirements, enforced at `POST /session` and again at `POST /run`:
 - For the two cloud prefixes, that provider's model must actually accept
   audio input. For the local path, Core_LLM must be reachable (checked the
-  same way a normal local `llm_model` would be).
+  same way a normal local `llm_model` would be), and the key must be one
+  Core_LLM actually has registered (`GET /chat_audio/models` on Core_LLM).
 - The audio file's container format must be accepted by the chosen
   provider — `openai:` only accepts `.wav`/`.mp3`; `gemini:` and the local
   path accept a wider set (`.wav`/`.mp3`/`.aac`/`.ogg`/`.flac`/`.aiff` —
@@ -147,18 +153,45 @@ Requirements, enforced at `POST /session` and again at `POST /run`:
 
 ```json
 { "instruction": "02_radiology_report_assist_stt", "stt_mode": "multimodal",
-  "llm_model": "gemini:gemini-2.5-flash-preview-native-audio-dialog",
-  "llm_api_key": "...", "llm_base_url": "https://api.gapgpt.app" }
+  "llm_model": "qwen3-omni-30b" }
 ```
 
 `GET /instructions/{id}` reports `"supports_multimodal_llm": true/false` so a
 client knows whether to offer this mode at all (only instructions with an
 `"llm_audio"` step support it; `01_Casebook` doesn't).
 
-Adding this to another instruction: give it a `"use": "llm_audio"` step
-tagged `"run_when_stt_mode": ["multimodal"]`, and tag its existing STT/LLM
-steps `"run_when_stt_mode": ["separate"]` (steps without this key always run,
-so instructions that don't use `stt_mode` at all are unaffected).
+### Hybrid mode: STT transcript(s) *and* audio, both given to the LLM
+
+`"stt_mode": "hybrid"` combines the two pipelines above: one or more STT
+slots run (same as `"separate"` — at least one must be configured), **and**
+the audio-capable LLM is given the audio directly (same as `"multimodal"`) —
+but this time, whichever `transcript_N` the STT slot(s) produced is folded
+into the LLM's prompt as labeled reference material, explicitly framed as
+"may contain errors, cross-check against what you hear, don't treat as
+ground truth." This is for helping the LLM's own listening/judgment with a
+second opinion, not for replacing it — the LLM's own transcription is still
+what gets returned; the STT transcript(s) are advisory input, not the
+answer.
+
+```json
+{ "instruction": "02_radiology_report_assist_stt", "stt_mode": "hybrid",
+  "llm_model": "qwen3-omni-30b",
+  "stt_slots": [{"model": "whisper"}] }
+```
+
+Same requirements as `"multimodal"` (audio-capable `llm_model`, format
+restrictions) *plus* the same STT-slot requirements as `"separate"` (at
+least one configured slot, `MAX_STT_SLOTS` cap, local-STT reachability).
+`01_Casebook` and other `stt_mode`-unaware instructions are unaffected —
+this only applies to instructions with both `"stt_slot"` and `"llm_audio"`
+steps tagged for it (see below).
+
+Adding either mode to another instruction: give it a `"use": "llm_audio"`
+step tagged `"run_when_stt_mode": ["multimodal", "hybrid"]`, tag its
+`"stt_slot"` steps `"run_when_stt_mode": ["separate", "hybrid"]`, and its
+purely-text `"llm"` reconcile step `"run_when_stt_mode": ["separate"]`
+(steps without this key always run, so instructions that don't use
+`stt_mode` at all are unaffected).
 
 **Confirmed working:** [GapGPT](https://gapgpt.app) — an Iran-based, Rial-payable
 gateway that proxies GPT/Claude/Gemini through the exact OpenAI request shape
