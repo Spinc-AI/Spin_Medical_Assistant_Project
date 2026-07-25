@@ -81,32 +81,48 @@ async def unload(model: str | None = None):
     return {"status": "unloaded", "model": m}
 
 
+@app.get("/chat_audio/models")
+def chat_audio_models():
+    """List the local audio-capable models available, and which is loaded."""
+    return {"available": multimodal.MANAGER.available(), "loaded": multimodal.MANAGER.loaded}
+
+
 @app.post("/chat_audio")
 async def chat_audio(
     file: UploadFile = File(...),
     system_prompt: str = Form(...),
     text: str | None = Form(default=None),
+    model: str | None = Form(default=None),
 ):
-    """Local multimodal chat: give the audio-capable model (Gemma 4 E4B) the
-    audio directly, no STT step. Separate from /chat -- this goes through
-    `transformers` directly, not Ollama, since Ollama doesn't support audio
-    input yet. There's currently only one such model, so no `model` param."""
+    """Local multimodal chat: give an audio-capable model the audio directly,
+    no STT step. Separate from /chat -- this goes through `transformers`
+    directly, not Ollama, since Ollama doesn't support audio input yet.
+
+    `model` picks which local audio-capable model to use (see
+    GET /chat_audio/models for the available keys); defaults to
+    config.DEFAULT_MULTIMODAL_MODEL. Only one is held in memory at a time --
+    switching models unloads the previous one first.
+    """
+    key = model or config.DEFAULT_MULTIMODAL_MODEL
     audio_bytes = await file.read()
     audio_format = (file.filename or "").rsplit(".", 1)[-1].lower() or "wav"
     try:
         reply = await run_in_threadpool(
-            multimodal.chat_audio, audio_bytes, audio_format, system_prompt, text
+            multimodal.MANAGER.chat_audio, key, audio_bytes, audio_format, system_prompt, text
         )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Multimodal LLM error: {exc}")
-    return {"model": config.MULTIMODAL_MODEL_ID, "reply": reply}
+    return {"model": key, "reply": reply}
 
 
 @app.post("/chat_audio/unload")
 async def chat_audio_unload():
-    """Unload the local multimodal model, freeing its VRAM."""
-    await run_in_threadpool(multimodal.unload)
-    return {"status": "unloaded", "model": config.MULTIMODAL_MODEL_ID}
+    """Unload the currently-loaded local multimodal model, freeing its VRAM."""
+    loaded = multimodal.MANAGER.loaded
+    await run_in_threadpool(multimodal.MANAGER.unload)
+    return {"status": "unloaded", "model": loaded}
 
 
 if __name__ == "__main__":

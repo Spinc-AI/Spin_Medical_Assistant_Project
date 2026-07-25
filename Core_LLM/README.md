@@ -25,8 +25,13 @@ ollama pull gemma4:31b        # Gemma 4's largest dense variant
 
 سپس با مثلاً <span dir="ltr">`"model": "aya-expanse:32b"`</span> در درخواست صدایش بزنید.
 
-## مدل چندوجهیِ محلی (صوت مستقیم، بدون <span dir="ltr">Ollama</span>)
+## مدل‌های چندوجهیِ محلی (صوت مستقیم، بدون <span dir="ltr">Ollama</span>)
 
-<span dir="ltr">Ollama</span> فعلاً ورودی صوتی را پشتیبانی نمی‌کند (فقط متن/تصویر) — با اینکه خودِ <span dir="ltr">Gemma 4 E4B</span> از صوت پشتیبانی می‌کند، از مسیر <span dir="ltr">`/chat`</span>ِ بالا قابل استفاده نیست. برای همین یک مسیر جدا و مستقل از <span dir="ltr">Ollama</span> اضافه شده: <span dir="ltr">`POST /chat_audio`</span> — مستقیماً از طریق <span dir="ltr">`transformers`</span> مدل <span dir="ltr">`google/gemma-4-E4B-it`</span> را بار می‌کند (اولین درخواست کمی طول می‌کشد، بعدش در حافظه می‌ماند). فقط همین یک مدل چندوجهی موجود است، پس نیازی به فیلد <span dir="ltr">`model`</span> نیست — فقط فایل صوتی + <span dir="ltr">`system_prompt`</span> بفرستید. جزئیات کامل در [deployment/README.md](deployment/README.md).
+<span dir="ltr">Ollama</span> فعلاً ورودی صوتی را پشتیبانی نمی‌کند (فقط متن/تصویر) — برای همین یک مسیر جدا و مستقل از <span dir="ltr">Ollama</span> اضافه شده: <span dir="ltr">`POST /chat_audio`</span> — مستقیماً از طریق <span dir="ltr">`transformers`</span>، با انتخاب مدل از طریق فیلد <span dir="ltr">`model`</span>:
+
+- <span dir="ltr">`gemma-4-e4b`</span> (پیش‌فرض) — <span dir="ltr">`google/gemma-4-E4B-it`</span>، سبک‌تر و سریع‌تر.
+- <span dir="ltr">`qwen3-omni-30b`</span> — <span dir="ltr">`Qwen/Qwen3-Omni-30B-A3B-Instruct`</span>، بهترین گزینه‌ی تست‌شده برای **صوت فارسی** (طبق بنچمارک مستقل <span dir="ltr">[PARSA-Bench](https://arxiv.org/html/2603.14456)</span>) — نیاز به حافظه‌ی <span dir="ltr">GPU</span> بیشتری دارد.
+
+فقط یکی از این دو در حافظه نگه داشته می‌شود؛ تغییر مدل، مدل قبلی را خودکار آزاد می‌کند. جزئیات کامل در [deployment/README.md](deployment/README.md).
 
 </div>

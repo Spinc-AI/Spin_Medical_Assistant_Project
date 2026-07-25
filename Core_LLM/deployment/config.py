@@ -24,9 +24,12 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8001"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
-# --- Local multimodal (audio-capable) model — served directly via transformers,
+# --- Local multimodal (audio-capable) models — served directly via transformers,
 # NOT through Ollama. Ollama doesn't support audio input yet (as of 2026-07),
-# even though this model's own weights do, so it needs its own serving path.
-# Lazy-loaded on first /chat_audio request, not at startup.
-MULTIMODAL_MODEL_ID = os.getenv("MULTIMODAL_MODEL_ID", "google/gemma-4-E4B-it")
+# even though these models' own weights do, so they need their own serving path.
+# Lazy-loaded on first /chat_audio request for a given model, not at startup;
+# only one is held in memory at a time (see multimodal.MultimodalManager).
+MULTIMODAL_GEMMA_MODEL_ID = os.getenv("MULTIMODAL_GEMMA_MODEL_ID", "google/gemma-4-E4B-it")
+MULTIMODAL_QWEN_MODEL_ID = os.getenv("MULTIMODAL_QWEN_MODEL_ID", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
+DEFAULT_MULTIMODAL_MODEL = os.getenv("DEFAULT_MULTIMODAL_MODEL", "gemma-4-e4b")
 MULTIMODAL_MAX_NEW_TOKENS = int(os.getenv("MULTIMODAL_MAX_NEW_TOKENS", "2048"))
