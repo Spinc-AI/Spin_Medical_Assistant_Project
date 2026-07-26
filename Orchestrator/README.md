@@ -126,6 +126,7 @@ one model in memory at a time), exposed at `POST /chat_audio`. **The
 | Key | Model | Notes |
 |---|---|---|
 | `gemma-4-e4b` (default) | `google/gemma-4-E4B-it` | Lighter, faster |
+| `gemma-4-12b` | `google/gemma-4-12B-it` | Largest **audio-capable** Gemma 4 (26B-A4B/31B have no audio input at all — image/video/text only) |
 | `qwen3-omni-30b` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | **Best tested option for Persian** — confirmed via [PARSA-Bench](https://arxiv.org/html/2603.14456), an independent Persian audio-LM benchmark (0.358 WER vs. 6-9 for Gemma-3n-class models). Needs real VRAM headroom. |
 
 This needs real GPU VRAM headroom; see `Core_LLM/deployment/requirements.txt`

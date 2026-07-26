@@ -98,6 +98,8 @@ Local Model or Custom Cloud API), three provider shapes total:
     directly — **not** Ollama, which still can't take audio input at all. A
     dropdown (replacing the Ollama-tag one used elsewhere) picks between:
     - `gemma-4-e4b` (default) — lighter, faster
+    - `gemma-4-12b` — largest **audio-capable** Gemma 4 (26B-A4B/31B have no
+      audio input at all — image/video/text only)
     - `qwen3-omni-30b` — **best tested option for Persian audio** (confirmed
       via an independent benchmark, PARSA-Bench)
   - **Custom Cloud API**, Cloud model = `openai:<model>` (or no prefix,

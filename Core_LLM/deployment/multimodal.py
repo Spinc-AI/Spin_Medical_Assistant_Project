@@ -53,7 +53,10 @@ class BaseMultimodalModel(ABC):
 
 
 class GemmaAudioModel(BaseMultimodalModel):
-    """Gemma 4 E4B via AutoModelForMultimodalLM."""
+    """Gemma 4's "Unified" (encoder-free) audio-capable models, via
+    AutoModelForMultimodalLM -- covers both E4B and 12B (the largest
+    audio-capable Gemma 4 variant; 26B-A4B and 31B are image/video/text
+    only, no audio input)."""
 
     def load(self):
         self._processor = AutoProcessor.from_pretrained(self.model_id, padding_side="left")
@@ -130,6 +133,7 @@ class QwenOmniAudioModel(BaseMultimodalModel):
 # ============================================================
 MODEL_REGISTRY = {
     "gemma-4-e4b": (GemmaAudioModel, config.MULTIMODAL_GEMMA_MODEL_ID),
+    "gemma-4-12b": (GemmaAudioModel, config.MULTIMODAL_GEMMA_12B_MODEL_ID),
     "qwen3-omni-30b": (QwenOmniAudioModel, config.MULTIMODAL_QWEN_MODEL_ID),
 }
 

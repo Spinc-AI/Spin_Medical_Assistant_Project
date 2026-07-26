@@ -30,6 +30,7 @@ ollama pull gemma4:31b        # Gemma 4's largest dense variant
 <span dir="ltr">Ollama</span> فعلاً ورودی صوتی را پشتیبانی نمی‌کند (فقط متن/تصویر) — برای همین یک مسیر جدا و مستقل از <span dir="ltr">Ollama</span> اضافه شده: <span dir="ltr">`POST /chat_audio`</span> — مستقیماً از طریق <span dir="ltr">`transformers`</span>، با انتخاب مدل از طریق فیلد <span dir="ltr">`model`</span>:
 
 - <span dir="ltr">`gemma-4-e4b`</span> (پیش‌فرض) — <span dir="ltr">`google/gemma-4-E4B-it`</span>، سبک‌تر و سریع‌تر.
+- <span dir="ltr">`gemma-4-12b`</span> — <span dir="ltr">`google/gemma-4-12B-it`</span>، بزرگ‌ترین نسخه‌ی **صوت‌پذیر** از <span dir="ltr">Gemma 4</span> — نسخه‌های <span dir="ltr">26B-A4B</span> و <span dir="ltr">31B</span> اصلاً ورودی صوتی ندارند (فقط تصویر/ویدیو)، پس این یکی، نه <span dir="ltr">31B</span>، قوی‌ترین گزینه‌ی <span dir="ltr">Gemma 4</span> برای صوت است.
 - <span dir="ltr">`qwen3-omni-30b`</span> — <span dir="ltr">`Qwen/Qwen3-Omni-30B-A3B-Instruct`</span>، بهترین گزینه‌ی تست‌شده برای **صوت فارسی** (طبق بنچمارک مستقل <span dir="ltr">[PARSA-Bench](https://arxiv.org/html/2603.14456)</span>) — نیاز به حافظه‌ی <span dir="ltr">GPU</span> بیشتری دارد.
 
 فقط یکی از این دو در حافظه نگه داشته می‌شود؛ تغییر مدل، مدل قبلی را خودکار آزاد می‌کند. جزئیات کامل در [deployment/README.md](deployment/README.md).

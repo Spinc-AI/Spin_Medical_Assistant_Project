@@ -30,6 +30,11 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 # Lazy-loaded on first /chat_audio request for a given model, not at startup;
 # only one is held in memory at a time (see multimodal.MultimodalManager).
 MULTIMODAL_GEMMA_MODEL_ID = os.getenv("MULTIMODAL_GEMMA_MODEL_ID", "google/gemma-4-E4B-it")
+# Gemma 4's audio support only exists on E2B/E4B/12B ("Unified", encoder-free)
+# -- NOT the 26B-A4B or 31B dense variants, which are image/video/text only.
+# 12B is the largest audio-capable one; same architecture family as E4B, so
+# it reuses GemmaAudioModel (see multimodal.py) rather than a new class.
+MULTIMODAL_GEMMA_12B_MODEL_ID = os.getenv("MULTIMODAL_GEMMA_12B_MODEL_ID", "google/gemma-4-12B-it")
 MULTIMODAL_QWEN_MODEL_ID = os.getenv("MULTIMODAL_QWEN_MODEL_ID", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
 DEFAULT_MULTIMODAL_MODEL = os.getenv("DEFAULT_MULTIMODAL_MODEL", "gemma-4-e4b")
 MULTIMODAL_MAX_NEW_TOKENS = int(os.getenv("MULTIMODAL_MAX_NEW_TOKENS", "2048"))

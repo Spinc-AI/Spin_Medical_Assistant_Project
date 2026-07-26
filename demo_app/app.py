@@ -64,7 +64,7 @@ LOCAL_LLM_MODELS = ["aya-expanse", "aya-expanse:32b", "gemma4:e4b", "gemma4:31b"
 # Core_LLM's registered local audio-capable models (Core_LLM/deployment/multimodal.py),
 # served via /chat_audio (not Ollama) -- the exact key sent IS meaningful now (Orchestrator
 # forwards it to Core_LLM's "model" field), unlike the old single-fixed-model version.
-LOCAL_MULTIMODAL_MODELS = ["gemma-4-e4b", "qwen3-omni-30b"]  # qwen3-omni-30b: best tested option for Persian
+LOCAL_MULTIMODAL_MODELS = ["gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]  # qwen3-omni-30b: best tested option for Persian
 
 # The Orchestrator's per-instruction STT pipeline choice: "separate" (STT-slots
 # only), "multimodal" (audio straight to an audio-capable LLM, no STT), or

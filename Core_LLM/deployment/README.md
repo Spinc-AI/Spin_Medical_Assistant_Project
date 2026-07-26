@@ -38,6 +38,7 @@ the current one first (same swap pattern as the STT module).
 | `model` key | Model | Notes |
 |---|---|---|
 | `gemma-4-e4b` (default) | `google/gemma-4-E4B-it` | Lighter, faster |
+| `gemma-4-12b` | `google/gemma-4-12B-it` | Largest **audio-capable** Gemma 4 variant — Gemma 4's 26B-A4B/31B are image/video/text only, no audio input, so this (not 31B) is the strongest Gemma 4 option here |
 | `qwen3-omni-30b` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | **Best tested option for Persian** — confirmed via [PARSA-Bench](https://arxiv.org/html/2603.14456), a Persian audio-LM benchmark (0.358 WER vs. 6-9 for Gemma-3n-class models). Bigger — needs real VRAM headroom (MoE, ~3B active params, but full weights are much larger). |
 
 Lazy-loaded on first request for a given model (slow the first time, fast
