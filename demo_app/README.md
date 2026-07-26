@@ -74,34 +74,43 @@ silently.
   info line plus both the local dropdown and cloud fields shown together,
   since both always run regardless of any selection.
 
-### Pipeline: Separate STT model(s) vs. Multimodal LLM mode
+### Pipeline: Separate STT model(s) vs. Multimodal LLM mode vs. Hybrid
 
 For instructions that support it (BuAli does; `GET /instructions/{id}`'s
 `supports_multimodal_llm`), a **"Pipeline:"** dropdown appears right next to
-the Instruction dropdown:
+the Instruction dropdown, with three options:
 
 - **Separate STT model(s)** (default) — the STT-slot pipeline described
   above: transcribe first, then the LLM reconciles the transcript(s).
 - **Multimodal LLM mode** — skips STT entirely; the audio is sent straight to
-  the LLM. Picking this mode hides the STT slot widgets; **LLM source stays a
-  free choice** (Remote Local Model or Custom Cloud API), three provider
-  shapes total:
-  - **Remote Local Model** — Core_LLM's own audio-capable model (Gemma 4 E4B,
-    served via a separate `/chat_audio` endpoint using `transformers`
-    directly — **not** Ollama, which still can't take audio input at all).
-    The Ollama-tag dropdown is replaced by a fixed label in this mode, since
-    there's only one local multimodal model and its selection doesn't matter.
+  the LLM.
+- **Hybrid (STT + Multimodal LLM)** — both at once: the STT slot widgets
+  stay visible (configure 1-3 engines, same as Separate mode) AND the audio
+  itself goes to the LLM (same as Multimodal mode) — the LLM sees the audio
+  directly plus whichever STT transcript(s) were produced, given to it as
+  reference material it can cross-check its own listening against (not
+  ground truth — its own transcription is still what gets returned).
+
+For Multimodal and Hybrid modes, **LLM source stays a free choice** (Remote
+Local Model or Custom Cloud API), three provider shapes total:
+  - **Remote Local Model** — one of Core_LLM's registered audio-capable
+    models, served via a separate `/chat_audio` endpoint using `transformers`
+    directly — **not** Ollama, which still can't take audio input at all. A
+    dropdown (replacing the Ollama-tag one used elsewhere) picks between:
+    - `gemma-4-e4b` (default) — lighter, faster
+    - `qwen3-omni-30b` — **best tested option for Persian audio** (confirmed
+      via an independent benchmark, PARSA-Bench)
   - **Custom Cloud API**, Cloud model = `openai:<model>` (or no prefix,
     defaults to this) — OpenAI-compatible `input_audio`; accepts `.wav`/`.mp3`
     audio only.
   - **Custom Cloud API**, Cloud model = `gemini:<model>` — Google's own
     Gemini API shape (needed for their "live"/native-audio-dialog models,
     e.g. via GapGPT); accepts `.wav`/`.mp3`/`.aac`/`.ogg`/`.flac`/`.aiff`. A
-    gray hint under the LLM fields reminds you of this once Custom Cloud API
-    is chosen in this mode.
+    gray hint under the LLM fields reminds you of both the local-model and
+    gemini: options whenever Multimodal or Hybrid mode is active.
 
-  Whichever path, an unsupported audio format is rejected with a clear error
-  before any API call is made.
+Whichever path, an unsupported audio format is rejected with a clear error
+before any API call is made.
 
 API key fields are never required to be preset on a server: type them in and
 they're sent with the request. On the Orchestrator tab, STT's and LLM's keys

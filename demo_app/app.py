@@ -61,17 +61,19 @@ DEFAULT_CLOUD_LLM_MODEL = "gpt-4o-mini"
 FALLBACK_LANGUAGES = {"fa": "Persian", "en": "English"}  # used before/without a server round-trip
 MAX_STT_SLOTS = 3  # mirrors the orchestrator's MAX_STT_SLOTS — multi-STT instructions (e.g. radiology)
 LOCAL_LLM_MODELS = ["aya-expanse", "aya-expanse:32b", "gemma4:e4b", "gemma4:31b"]  # Ollama tags available on Core_LLM
-# Core_LLM's one local audio-capable model (config.MULTIMODAL_MODEL_ID), served via
-# /chat_audio (not Ollama). Used for display/filenames only -- Orchestrator's local-vs-
-# cloud dispatch just checks for an "openai:"/"gemini:" prefix, not this literal string.
-LOCAL_MULTIMODAL_MODEL_NAME = "gemma-4-E4B-it"
+# Core_LLM's registered local audio-capable models (Core_LLM/deployment/multimodal.py),
+# served via /chat_audio (not Ollama) -- the exact key sent IS meaningful now (Orchestrator
+# forwards it to Core_LLM's "model" field), unlike the old single-fixed-model version.
+LOCAL_MULTIMODAL_MODELS = ["gemma-4-e4b", "qwen3-omni-30b"]  # qwen3-omni-30b: best tested option for Persian
 
-# The Orchestrator's per-instruction STT pipeline choice: transcribe with our
-# own STT-slot pipeline first (default), or skip STT and feed the audio
-# straight to an audio-capable cloud LLM ("use": "llm_audio" in the
-# instruction's JSON — see supports_multimodal_llm from GET /instructions/{id}).
+# The Orchestrator's per-instruction STT pipeline choice: "separate" (STT-slots
+# only), "multimodal" (audio straight to an audio-capable LLM, no STT), or
+# "hybrid" (both -- STT slot(s) run AND the LLM hears the audio directly, with
+# the STT transcript(s) folded in as reference material) -- see
+# supports_multimodal_llm from GET /instructions/{id}.
 SEPARATE_STT_LABEL = "Separate STT model(s)"
 MULTIMODAL_LLM_LABEL = "Multimodal LLM mode"
+HYBRID_LABEL = "Hybrid (STT + Multimodal LLM)"
 
 
 def cloud_transcribe(base_url, api_key, model, audio_bytes, filename, language=None):
@@ -791,7 +793,7 @@ class OrchestratorTab(ttk.Frame):
         self.pipeline_label = ttk.Label(self, text="Pipeline:")
         self.pipeline_mode = tk.StringVar(value=SEPARATE_STT_LABEL)
         self.pipeline_box = ttk.Combobox(self, textvariable=self.pipeline_mode, width=22, state="readonly",
-                                         values=[SEPARATE_STT_LABEL, MULTIMODAL_LLM_LABEL])
+                                         values=[SEPARATE_STT_LABEL, MULTIMODAL_LLM_LABEL, HYBRID_LABEL])
         self.pipeline_label.grid(row=1, column=3, sticky="w", padx=(12, 0))
         self.pipeline_box.grid(row=1, column=4, sticky="w")
         self.pipeline_label.grid_remove()
@@ -837,14 +839,16 @@ class OrchestratorTab(ttk.Frame):
                                           width=18, values=LOCAL_LLM_MODELS)
 
         self.llm_cloud = CloudFieldsFrame(self.llm_frame, DEFAULT_CLOUD_LLM_MODEL)
-        self.multimodal_local_label = ttk.Label(
-            self.llm_frame,
-            text="Local: Core_LLM's audio-capable model (Gemma 4 E4B, served via /chat_audio — "
-                 "not Ollama, which can't take audio). Fixed — there's only one, no model choice needed.")
+        self.multimodal_local_model = tk.StringVar(value=LOCAL_MULTIMODAL_MODELS[0])
+        self.multimodal_local_box = ttk.Combobox(
+            self.llm_frame, textvariable=self.multimodal_local_model, width=18,
+            state="readonly", values=LOCAL_MULTIMODAL_MODELS)
         self.multimodal_hint = ttk.Label(
             self.llm_frame, foreground="gray",
-            text="Multimodal LLM mode: for a Gemini audio model (e.g. via GapGPT), "
-                 "prefix Cloud model with \"gemini:\" — e.g. gemini:gemini-2.5-flash-preview-native-audio-dialog")
+            text="Local: served via Core_LLM's /chat_audio (not Ollama, which can't take audio) — "
+                 "qwen3-omni-30b is the best tested option for Persian. Cloud: for a Gemini audio "
+                 "model (e.g. via GapGPT), prefix Cloud model with \"gemini:\" — e.g. "
+                 "gemini:gemini-2.5-flash-preview-native-audio-dialog")
 
         ttk.Button(self, text="Start session", command=self.start_session).grid(row=4, column=0, sticky="w", pady=10)
         ttk.Button(self, text="Unload session", command=self.unload_session).grid(row=4, column=1, sticky="w")
@@ -882,6 +886,13 @@ class OrchestratorTab(ttk.Frame):
     def _is_multimodal(self):
         return self._supports_multimodal_llm and self.pipeline_mode.get() == MULTIMODAL_LLM_LABEL
 
+    def _is_hybrid(self):
+        return self._supports_multimodal_llm and self.pipeline_mode.get() == HYBRID_LABEL
+
+    def _uses_llm_audio(self):
+        """Multimodal or hybrid -- either way the LLM needs audio-capable handling."""
+        return self._is_multimodal() or self._is_hybrid()
+
     def _on_pipeline_mode_change(self):
         self._update_stt_section()
         self._update_llm_section()
@@ -916,27 +927,27 @@ class OrchestratorTab(ttk.Frame):
             self.stt_cloud.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
     def _update_llm_section(self):
-        # Multimodal LLM mode can use EITHER a local audio-capable model
-        # (Core_LLM's /chat_audio, Gemma 4 E4B) or a cloud one ("openai:"/
-        # "gemini:" prefix) — Ollama itself still can't take audio, but
-        # Core_LLM's separate /chat_audio path isn't Ollama-backed, so local
-        # is a real option here (unlike in the earlier, cloud-only version).
+        # Multimodal/hybrid modes can use EITHER a local audio-capable model
+        # (Core_LLM's /chat_audio -- gemma-4-e4b or qwen3-omni-30b) or a cloud
+        # one ("openai:"/"gemini:" prefix) — Ollama itself still can't take
+        # audio, but Core_LLM's separate /chat_audio path isn't Ollama-backed,
+        # so local is a real option here.
         self.llm_mode.box.config(state="readonly")
 
         if self.llm_mode.is_cloud():
             self.llm_local_box.grid_remove()
-            self.multimodal_local_label.grid_remove()
+            self.multimodal_local_box.grid_remove()
             self.llm_cloud.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        elif self._is_multimodal():
+        elif self._uses_llm_audio():
             self.llm_local_box.grid_remove()
             self.llm_cloud.grid_remove()
-            self.multimodal_local_label.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            self.multimodal_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
         else:
             self.llm_cloud.grid_remove()
-            self.multimodal_local_label.grid_remove()
+            self.multimodal_local_box.grid_remove()
             self.llm_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        if self._is_multimodal() and self.llm_mode.is_cloud():
+        if self._uses_llm_audio():
             self.multimodal_hint.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
         else:
             self.multimodal_hint.grid_remove()
@@ -962,12 +973,12 @@ class OrchestratorTab(ttk.Frame):
             if model.startswith("openai:") or model.startswith("gemini:"):
                 return model
             return "openai:" + model
-        if self._is_multimodal():
+        if self._uses_llm_audio():
             # llm_local_box (and whatever Ollama tag it holds) is hidden in this
-            # combination — report the model that's actually running instead of
-            # a stale/irrelevant dropdown value, so the session display and
-            # saved-transcript filename reflect reality.
-            return LOCAL_MULTIMODAL_MODEL_NAME
+            # combination — report the local multimodal model actually chosen
+            # instead of a stale/irrelevant Ollama-tag dropdown value, so the
+            # session display and saved-transcript filename reflect reality.
+            return self.multimodal_local_model.get().strip()
         return self.llm_local_model.get().strip()
 
     def refresh_models(self):
@@ -1120,6 +1131,13 @@ class OrchestratorTab(ttk.Frame):
             run_bg(self._start_session_bg, payload)
             return
 
+        if self._is_hybrid():
+            # Same as separate mode below (STT slots + generic LLM key/base
+            # handling) -- just tags the session so Orchestrator ALSO feeds
+            # the audio itself to the LLM, alongside whichever transcripts
+            # the STT slot(s) below produce. No early return.
+            payload["stt_mode"] = "hybrid"
+
         if self._stt_slot_count > 0:
             slots = [w.as_slot_config() for w in self.stt_slot_widgets[:self._stt_slot_count]]
             if not any(slots):
@@ -1168,8 +1186,10 @@ class OrchestratorTab(ttk.Frame):
             return
 
         if self._is_multimodal():
-            # No STT at all — audio goes straight to the (cloud-only, per
-            # _update_llm_section) LLM. Nothing here needs stt_slots_json.
+            # No STT at all — audio goes straight to the LLM (local or cloud,
+            # per _update_llm_section). Nothing here needs stt_slots_json.
+            # (Hybrid mode falls through to the STT-slot logic below instead,
+            # since it needs both stt_slots_json AND the audio file.)
             llm_key = self.llm_cloud.api_key.get().strip()
             llm_base = self.llm_cloud.base_url.get().strip()
             self.output.write("running...")
