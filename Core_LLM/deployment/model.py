@@ -100,7 +100,7 @@ class TextOnlyModel(BaseLLM):
     def load(self):
         self._processor = AutoTokenizer.from_pretrained(self.model_id)
         self._model = AutoModelForCausalLM.from_pretrained(
-            self.model_id, device_map="auto", dtype="auto"
+            self.model_id, device_map=config.DEVICE_MAP, dtype="auto"
         )
 
     def chat(self, messages, audio_path=None, temperature=0.3, response_format=None):
@@ -132,7 +132,7 @@ class GemmaAudioModel(BaseLLM):
     def load(self):
         self._processor = AutoProcessor.from_pretrained(self.model_id, padding_side="left")
         self._model = AutoModelForMultimodalLM.from_pretrained(
-            self.model_id, device_map="auto", attn_implementation="sdpa"
+            self.model_id, device_map=config.DEVICE_MAP, attn_implementation="sdpa"
         )
 
     def chat(self, messages, audio_path=None, temperature=0.3, response_format=None):
@@ -174,7 +174,7 @@ class QwenOmniModel(BaseLLM):
     def load(self):
         self._processor = Qwen3OmniMoeProcessor.from_pretrained(self.model_id)
         self._model = Qwen3OmniMoeThinkerForConditionalGeneration.from_pretrained(
-            self.model_id, device_map="auto"
+            self.model_id, device_map=config.DEVICE_MAP
         )
 
     def chat(self, messages, audio_path=None, temperature=0.3, response_format=None):

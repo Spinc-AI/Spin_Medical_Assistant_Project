@@ -37,3 +37,12 @@ QWEN_OMNI_MODEL_ID = os.getenv("QWEN_OMNI_MODEL_ID", "Qwen/Qwen3-Omni-30B-A3B-In
 
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "aya-expanse-8b")
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "2048"))
+
+# transformers' device_map passed to every from_pretrained() call. "cuda" pins
+# everything to the single GPU (no automatic CPU offload); "auto" lets
+# accelerate decide, which can be unnecessarily conservative on unified-memory
+# hardware (e.g. NVIDIA GB10 -- CUDA correctly reports the full ~130GB pool,
+# but "auto" still partially offloaded a 24GB model to CPU there). Override to
+# "auto" if you're on a server where the model genuinely doesn't fit in one
+# GPU's VRAM and offload is actually needed.
+DEVICE_MAP = os.getenv("DEVICE_MAP", "cuda")
