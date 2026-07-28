@@ -60,11 +60,16 @@ DEFAULT_CLOUD_STT_MODEL = "whisper-1"
 DEFAULT_CLOUD_LLM_MODEL = "gpt-4o-mini"
 FALLBACK_LANGUAGES = {"fa": "Persian", "en": "English"}  # used before/without a server round-trip
 MAX_STT_SLOTS = 3  # mirrors the orchestrator's MAX_STT_SLOTS — multi-STT instructions (e.g. radiology)
-LOCAL_LLM_MODELS = ["aya-expanse", "aya-expanse:32b", "gemma4:e4b", "gemma4:31b"]  # Ollama tags available on Core_LLM
-# Core_LLM's registered local audio-capable models (Core_LLM/deployment/multimodal.py),
-# served via /chat_audio (not Ollama) -- the exact key sent IS meaningful now (Orchestrator
-# forwards it to Core_LLM's "model" field), unlike the old single-fixed-model version.
-LOCAL_MULTIMODAL_MODELS = ["gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]  # qwen3-omni-30b: best tested option for Persian
+# Core_LLM's registered local models (Core_LLM/deployment/model.py) -- all served
+# directly via transformers, not Ollama. One model is loaded at a time and serves
+# BOTH text-only chat and (if it supports_audio) BuAli's multimodal/hybrid pipelines,
+# so this single list covers every "Remote Local Model" dropdown in the app.
+LOCAL_LLM_MODELS = ["aya-expanse-8b", "aya-expanse-32b", "gemma-4-31b",
+                    "gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]
+# Subset that actually accepts audio input -- used to filter the dropdown down
+# to valid choices whenever the pipeline mode needs an audio-capable model.
+# qwen3-omni-30b: best tested option for Persian audio (see Core_LLM's README).
+LOCAL_AUDIO_MODELS = ["gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]
 
 # The Orchestrator's per-instruction STT pipeline choice: "separate" (STT-slots
 # only), "multimodal" (audio straight to an audio-capable LLM, no STT), or
@@ -677,7 +682,7 @@ class LLMTab(ttk.Frame):
         self.conn = ConnectionBar(self.local_frame, default_port=8001, health_path="/")
         self.conn.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Label(self.local_frame, text="Model:").grid(row=1, column=0, sticky="w")
-        self.model = tk.StringVar(value="aya-expanse")
+        self.model = tk.StringVar(value=LOCAL_LLM_MODELS[0])
         ttk.Combobox(self.local_frame, textvariable=self.model, width=20,
                     values=LOCAL_LLM_MODELS).grid(row=1, column=1, sticky="w")
         self.unload_btn = ttk.Button(self.local_frame, text="Unload model", command=self.unload_model)
@@ -834,15 +839,16 @@ class OrchestratorTab(ttk.Frame):
         self.llm_mode.grid(row=0, column=0, columnspan=4, sticky="w")
         self.llm_mode.mode.trace_add("write", lambda *a: self._update_llm_section())
 
-        self.llm_local_model = tk.StringVar(value="aya-expanse")
+        # One dropdown for every "Remote Local Model" case -- separate mode
+        # (any of the 6), multimodal/hybrid mode (filtered to the audio-capable
+        # 3 in _update_llm_section, since only one model is loaded at a time
+        # and it serves both text and audio roles regardless of which endpoint
+        # a request came in through).
+        self.llm_local_model = tk.StringVar(value=LOCAL_LLM_MODELS[0])
         self.llm_local_box = ttk.Combobox(self.llm_frame, textvariable=self.llm_local_model,
-                                          width=18, values=LOCAL_LLM_MODELS)
+                                          width=18, state="readonly", values=LOCAL_LLM_MODELS)
 
         self.llm_cloud = CloudFieldsFrame(self.llm_frame, DEFAULT_CLOUD_LLM_MODEL)
-        self.multimodal_local_model = tk.StringVar(value=LOCAL_MULTIMODAL_MODELS[0])
-        self.multimodal_local_box = ttk.Combobox(
-            self.llm_frame, textvariable=self.multimodal_local_model, width=18,
-            state="readonly", values=LOCAL_MULTIMODAL_MODELS)
         self.multimodal_hint = ttk.Label(
             self.llm_frame, foreground="gray",
             text="Local: served via Core_LLM's /chat_audio (not Ollama, which can't take audio) — "
@@ -928,23 +934,26 @@ class OrchestratorTab(ttk.Frame):
 
     def _update_llm_section(self):
         # Multimodal/hybrid modes can use EITHER a local audio-capable model
-        # (Core_LLM's /chat_audio -- gemma-4-e4b or qwen3-omni-30b) or a cloud
-        # one ("openai:"/"gemini:" prefix) — Ollama itself still can't take
-        # audio, but Core_LLM's separate /chat_audio path isn't Ollama-backed,
-        # so local is a real option here.
+        # (Core_LLM's /chat_audio) or a cloud one ("openai:"/"gemini:" prefix)
+        # — Ollama itself still can't take audio, but Core_LLM's own local
+        # models are served via transformers directly, not Ollama, so local
+        # is a real option here.
         self.llm_mode.box.config(state="readonly")
+
+        # Same one dropdown either way -- just filter its values down to the
+        # audio-capable subset when the pipeline mode needs that, so you can't
+        # pick a combination that'll just error out server-side.
+        wanted_values = LOCAL_AUDIO_MODELS if self._uses_llm_audio() else LOCAL_LLM_MODELS
+        if list(self.llm_local_box["values"]) != wanted_values:
+            self.llm_local_box["values"] = wanted_values
+            if self.llm_local_model.get() not in wanted_values:
+                self.llm_local_model.set(wanted_values[0])
 
         if self.llm_mode.is_cloud():
             self.llm_local_box.grid_remove()
-            self.multimodal_local_box.grid_remove()
             self.llm_cloud.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        elif self._uses_llm_audio():
-            self.llm_local_box.grid_remove()
-            self.llm_cloud.grid_remove()
-            self.multimodal_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
         else:
             self.llm_cloud.grid_remove()
-            self.multimodal_local_box.grid_remove()
             self.llm_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         if self._uses_llm_audio():
@@ -973,12 +982,6 @@ class OrchestratorTab(ttk.Frame):
             if model.startswith("openai:") or model.startswith("gemini:"):
                 return model
             return "openai:" + model
-        if self._uses_llm_audio():
-            # llm_local_box (and whatever Ollama tag it holds) is hidden in this
-            # combination — report the local multimodal model actually chosen
-            # instead of a stale/irrelevant Ollama-tag dropdown value, so the
-            # session display and saved-transcript filename reflect reality.
-            return self.multimodal_local_model.get().strip()
         return self.llm_local_model.get().strip()
 
     def refresh_models(self):

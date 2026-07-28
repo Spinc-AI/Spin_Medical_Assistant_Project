@@ -93,15 +93,21 @@ the Instruction dropdown, with three options:
 
 For Multimodal and Hybrid modes, **LLM source stays a free choice** (Remote
 Local Model or Custom Cloud API), three provider shapes total:
-  - **Remote Local Model** — one of Core_LLM's registered audio-capable
-    models, served via a separate `/chat_audio` endpoint using `transformers`
-    directly — **not** Ollama, which still can't take audio input at all. A
-    dropdown (replacing the Ollama-tag one used elsewhere) picks between:
-    - `gemma-4-e4b` (default) — lighter, faster
+  - **Remote Local Model** — one of Core_LLM's registered models, served via
+    `transformers` directly — **not** Ollama, which can't take audio input at
+    all (Core_LLM dropped Ollama entirely — see its README). It's the same
+    "Model" dropdown used everywhere else in the app, just filtered down to
+    the audio-capable subset whenever the pipeline mode needs one:
+    - `gemma-4-e4b` — lighter, faster
     - `gemma-4-12b` — largest **audio-capable** Gemma 4 (26B-A4B/31B have no
       audio input at all — image/video/text only)
     - `qwen3-omni-30b` — **best tested option for Persian audio** (confirmed
       via an independent benchmark, PARSA-Bench)
+
+    (In Separate mode, or the plain Core_LLM tab, the same dropdown widens
+    back out to all 6 registered models — including the text-only
+    `aya-expanse-8b`/`32b` and `gemma-4-31b` — since only Multimodal/Hybrid
+    actually need audio capability.)
   - **Custom Cloud API**, Cloud model = `openai:<model>` (or no prefix,
     defaults to this) — OpenAI-compatible `input_audio`; accepts `.wav`/`.mp3`
     audio only.
