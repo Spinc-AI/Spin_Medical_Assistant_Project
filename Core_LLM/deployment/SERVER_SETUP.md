@@ -1,59 +1,59 @@
-# 3090 Server Setup (run these ON the server)
+# Server setup (run these ON the GPU server)
 
-Goal: get Ollama serving `aya-expanse-8b` on the GPU. Do this once; afterwards
-you only pay for server time while you're actively testing.
+Core_LLM serves all its models directly via `transformers` — no Ollama, no
+external API, nothing to install beyond Python packages and a CUDA-enabled
+`torch`. Do this once per server.
 
-## 1. Install Ollama (one time)
-
-**Linux server:**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-Ollama auto-detects the NVIDIA GPU. Verify the 3090 is seen:
-```bash
-nvidia-smi          # should list "GeForce RTX 3090", 24GB
-```
-
-## 2. Pull the model (one time, ~5 GB download)
+## 1. Confirm the GPU is visible
 
 ```bash
-ollama pull aya-expanse        # the 8B version
-# (aya-expanse:32b also exists and fits in 24GB quantized, but start with 8B)
+nvidia-smi          # should list your GPU and its VRAM
 ```
 
-## 3. Serve it
+## 2. Install dependencies
 
-Ollama runs as a background service after install and listens on
-`localhost:11434`. Confirm it's up:
 ```bash
-ollama list                    # should show aya-expanse
-curl http://localhost:11434/api/tags
+cd Core_LLM/deployment
+pip install -r requirements.txt
+```
+If `pip install torch` grabs a CPU-only build, reinstall the CUDA one explicitly
+(see [pytorch.org](https://pytorch.org) for the exact command for your CUDA version):
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-That's all the server needs. Leave it running while you work.
+## 3. Start the service
+
+```bash
+bash run.sh          # or: python main.py
+```
+Listens on `0.0.0.0:8001`. **No model is loaded at startup** — the first
+request for a given model (via `/chat` or `/chat_audio`) downloads it from
+Hugging Face and loads it into VRAM, which takes a while the first time;
+after that it stays in memory until you switch models or call `/unload`.
+
+Confirm it's up:
+```bash
+curl http://localhost:8001/
+curl http://localhost:8001/models          # all registered models
+curl http://localhost:8001/chat_audio/models  # just the audio-capable ones
+```
 
 ---
 
 # Connecting from your Windows machine
 
-Don't expose Ollama to the open internet. Instead, open a secure **SSH tunnel**
-so the server's port 11434 appears as `localhost:11434` on your machine. Your
-Python code then needs no changes between local and server.
-
-In a PowerShell window on your machine (keep it open while working):
+Don't expose port 8001 to the open internet. Open a secure **SSH tunnel** so
+the server's port 8001 appears as `localhost:8001` on your machine:
 ```powershell
-ssh -L 11434:localhost:11434 user@your-server-address
+ssh -p <port> -L 8001:localhost:8001 user@your-server-address
 ```
 
-Now in a second window, run the project:
+Then, in a second window, either hit the HTTP API directly (`curl`, the demo
+app's Core_LLM tab) or run the no-server terminal test:
 ```powershell
-python chat.py
+python chat.py                 # uses config.DEFAULT_MODEL
+python chat.py qwen3-omni-30b  # or pick a specific registry key
 ```
 
-When you're done, close the SSH window and shut the server down to stop billing.
-
-## Quick cost-saving workflow
-1. Write/edit code locally (free).
-2. Start server → open SSH tunnel.
-3. Test against the real model.
-4. Close tunnel + stop server.
+When you're done, close the tunnel and shut the server down to stop billing.

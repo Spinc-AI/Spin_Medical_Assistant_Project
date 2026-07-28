@@ -10,7 +10,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
-    model: str | None = None        # falls back to config.LLM_MODEL
+    model: str | None = None        # falls back to config.DEFAULT_MODEL
     temperature: float = 0.3        # low default — medical use wants consistency
     response_format: dict | None = None  # e.g. {"type": "json_object"} for JSON mode
 

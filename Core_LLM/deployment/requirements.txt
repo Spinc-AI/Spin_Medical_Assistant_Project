@@ -1,5 +1,3 @@
-# LLM client — Ollama exposes an OpenAI-compatible API, so we use the openai SDK
-openai>=1.30
 python-dotenv>=1.0
 
 # HTTP API layer (main.py) — lets the orchestrator call Core_LLM over HTTP
@@ -9,15 +7,16 @@ pydantic
 httpx
 python-multipart   # multipart form parsing, needed for /chat_audio's UploadFile
 
-# Local multimodal (audio-capable) models — served directly via transformers,
-# not Ollama (Ollama doesn't support audio input yet). Needs a GPU with real
-# VRAM headroom -- Gemma 4 E4B is modest, Qwen3-Omni-30B (MoE, ~3B active
-# params) needs much more room for its full weights even though it's fast to
-# run. Install the CUDA build of torch, see https://pytorch.org for the
-# right command for your system.
+# All local models — served directly via transformers (see model.py), NOT
+# Ollama (Ollama doesn't support audio input at all, and this project no
+# longer runs two serving paths side by side). Needs a GPU with real VRAM
+# headroom -- no quantization here (unlike Ollama, which auto-quantized for
+# you), so a 32B-class model can need 60GB+ VRAM at full precision. Install
+# the CUDA build of torch, see https://pytorch.org for the right command
+# for your system.
 torch
 transformers        # needs a version with Gemma4 (AutoModelForMultimodalLM) AND Qwen3-Omni
-                     # (Qwen3OmniMoeForConditionalGeneration) support -- use latest
+                     # (Qwen3OmniMoeThinkerForConditionalGeneration) support -- use latest
 accelerate           # for device_map="auto"
 soundfile
 librosa
