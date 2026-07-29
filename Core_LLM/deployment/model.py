@@ -187,8 +187,14 @@ class QwenOmniModel(BaseLLM):
                 content = [{"type": "audio", "path": audio_path}] + content
             converted.append({"role": m["role"], "content": content})
 
+        # load_audio_from_video (from the reference docs example) deliberately
+        # dropped -- we never pass video, only audio, and this kwarg was the
+        # likely cause of a "coroutine raised StopIteration" failure on this
+        # transformers version (its processor.__call__ kwarg-passing
+        # convention changed; this parameter isn't needed for our use case
+        # anyway, so removing it sidesteps the incompatibility entirely).
         inputs = self._processor.apply_chat_template(
-            converted, load_audio_from_video=True, add_generation_prompt=True,
+            converted, add_generation_prompt=True,
             tokenize=True, return_dict=True, return_tensors="pt", padding=True,
         ).to(self._model.device)
         # Slicing off input_len (unlike the reference docs snippet, which decodes
