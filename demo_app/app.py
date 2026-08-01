@@ -850,7 +850,7 @@ class OrchestratorTab(ttk.Frame):
 
         self.llm_cloud = CloudFieldsFrame(self.llm_frame, DEFAULT_CLOUD_LLM_MODEL)
         self.multimodal_hint = ttk.Label(
-            self.llm_frame, foreground="gray",
+            self.llm_frame, foreground="gray", justify="left", wraplength=640,
             text="Local: served via Core_LLM's /chat_audio (not Ollama, which can't take audio) — "
                  "qwen3-omni-30b is the best tested option for Persian. Cloud: for a Gemini audio "
                  "model (e.g. via GapGPT), prefix Cloud model with \"gemini:\" — e.g. "
@@ -1273,6 +1273,11 @@ class DemoApp(tk.Tk):
         super().__init__()
         self.title("Spin Medical Assistant — Demo")
         self.geometry("900x760")
+        # Safety net: even if some future widget's content wants to be wider
+        # than this, cap the window itself to the visible screen so it can
+        # never grow off-screen (e.g. an unwrapped long label forcing a resize).
+        self.maxsize(min(1400, self.winfo_screenwidth() - 40),
+                    min(1000, self.winfo_screenheight() - 80))
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
