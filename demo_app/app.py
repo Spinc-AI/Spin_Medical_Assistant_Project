@@ -466,6 +466,39 @@ class OutputBox(scrolledtext.ScrolledText):
         self.config(state="disabled")
 
 
+class ScrollableFrame(ttk.Frame):
+    """A frame with a vertical scrollbar. Put content in `.body`, not on
+    `self` directly. Used to wrap each notebook tab so content that doesn't
+    fit the window (e.g. the Save Transcript button, below several stacked
+    STT slot widgets) is still reachable by scrolling instead of requiring
+    the window to grow to fit everything at once."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(self, highlightthickness=0)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        self.body = ttk.Frame(canvas, padding=10)
+        window = canvas.create_window((0, 0), window=self.body, anchor="nw")
+
+        self.body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(window, width=e.width))
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # Only scroll this canvas while the mouse is actually over it -- a
+        # global bind_all would hijack scrolling everywhere (e.g. inside a
+        # combobox's own dropdown list) regardless of which tab is active.
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+
 # ---------------------------------------------------------------------------
 # STT tab
 # ---------------------------------------------------------------------------
@@ -911,7 +944,14 @@ class OrchestratorTab(ttk.Frame):
             w.grid_remove()
 
         if self._is_multimodal():
-            return  # no STT at all in this mode — audio goes straight to the LLM
+            # No STT at all in this mode — audio goes straight to the LLM.
+            # Collapse the WHOLE frame (not just its children), or the row it
+            # occupies keeps reserving space for whatever was shown last time
+            # (e.g. 3 stacked STT slot widgets), leaving a large empty gap
+            # above the LLM section.
+            self.stt_frame.grid_remove()
+            return
+        self.stt_frame.grid()
 
         if self._stt_slot_count > 0:
             for i in range(self._stt_slot_count):
@@ -1273,17 +1313,17 @@ class DemoApp(tk.Tk):
         super().__init__()
         self.title("Spin Medical Assistant — Demo")
         self.geometry("900x760")
-        # Safety net: even if some future widget's content wants to be wider
-        # than this, cap the window itself to the visible screen so it can
-        # never grow off-screen (e.g. an unwrapped long label forcing a resize).
-        self.maxsize(min(1400, self.winfo_screenwidth() - 40),
-                    min(1000, self.winfo_screenheight() - 80))
+        # Freely resizable/maximizable -- content that doesn't fit is reached
+        # by scrolling (ScrollableFrame below) rather than by capping the
+        # window's growth, so there's no need to restrict maxsize here.
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
-        notebook.add(STTTab(notebook), text="STT")
-        notebook.add(LLMTab(notebook), text="Core_LLM")
-        notebook.add(OrchestratorTab(notebook), text="Orchestrator")
+
+        for tab_cls, label in [(STTTab, "STT"), (LLMTab, "Core_LLM"), (OrchestratorTab, "Orchestrator")]:
+            scroller = ScrollableFrame(notebook)
+            tab_cls(scroller.body).pack(fill="both", expand=True)
+            notebook.add(scroller, text=label)
 
 
 if __name__ == "__main__":
