@@ -196,7 +196,7 @@ class QwenOmniModel(BaseLLM):
         inputs = self._processor.apply_chat_template(
             converted, add_generation_prompt=True,
             tokenize=True, return_dict=True, return_tensors="pt", padding=True,
-        ).to(self._model.device)
+        ).to(self._model.device, dtype=self._model.dtype)
         # Slicing off input_len (unlike the reference docs snippet, which decodes
         # the full sequence) so the reply doesn't echo the prompt back -- same
         # reasoning as GemmaAudioModel above.
