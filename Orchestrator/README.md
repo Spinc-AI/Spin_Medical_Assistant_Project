@@ -5,6 +5,13 @@ modules (STT, Core_LLM) over their HTTP APIs. It reads an **instruction** (a JSO
 workflow at `instruction/<NN_Name>/core_instruction.json`) and runs it: pick models
 -> load them -> take audio or text -> (STT if audio) -> LLM fills the form.
 
+The BuAli and Casebook use cases that used to live here have been extracted
+into their own standalone projects (`Spin_BuAli`, `Spin_CaseBook`) — each with
+a hardcoded controller instead of a generic JSON instruction, for a simpler
+and faster single-purpose service. This engine remains available for *other*
+future use cases; `instruction/` is currently empty (`GET /instructions`
+returns `[]`) until a new one is added here.
+
 ## Run
 ```bash
 pip install -r requirements.txt
@@ -37,47 +44,39 @@ session default, optionally overridden per `/run` call.
 
 ## Typical sequence
 ```bash
-curl -X POST http://193.93.169.134:9000/session -H "Content-Type: application/json"   -d '{"instruction":"01_casebook","stt_model":"whisper","llm_model":"aya-expanse"}'
+curl -X POST http://193.93.169.134:9000/session -H "Content-Type: application/json"   -d '{"instruction":"<instruction_id>","stt_model":"whisper","llm_model":"aya-expanse-8b"}'
 
 curl -X POST http://193.93.169.134:9000/run -F "file=@clip.wav"
-# or:  curl -X POST http://193.93.169.134:9000/run -F "text=patient is Ali, 45, male ..."
+# or:  curl -X POST http://193.93.169.134:9000/run -F "text=some input text"
 
 curl -X POST http://193.93.169.134:9000/session/unload
 ```
 
 ## Instructions
 Each instruction is a folder under `instruction/` holding a `core_instruction.json`
-(the workflow) plus its template(s).
-
-| Folder | Displayed name | Does |
-|---|---|---|
-| `01_Casebook` | Casebook | audio-or-text -> LLM fills a patient form |
-| `02_Radiology_Report_Assist_STT` | **BuAli** | audio -> up to **three** independently local-or-cloud STT transcripts -> LLM reconciles whichever were produced into one corrected report |
-
-The folder name is the on-disk id and doesn't change; `"name"` inside each
-`core_instruction.json` is what the UI actually shows — the radiology
-instruction's `"name"` is `"BuAli"`.
+(the workflow) plus its template(s). The folder name is the on-disk id and
+doesn't change; `"name"` inside `core_instruction.json` is what the UI shows.
+There are currently no instructions here — add a new folder + JSON to define
+one; the sections below describe the step types available for it.
 
 ## Local vs. API — models and providers
 
 `stt_model` and `llm_model` support the same convention: prefix with `openai:`
 to route that step to the external API instead of the local service — e.g.
 `"stt_model": "openai:whisper-1"`, `"llm_model": "openai:gpt-4o-mini"`.
-Leaving off the prefix (`"whisper"`, `"aya-expanse"`) uses the local module.
+Leaving off the prefix (`"whisper"`, `"aya-expanse-8b"`) uses the local module.
 This only applies to a **generic** step (`"use": "stt"` or `"use": "llm"` in
-the instruction's JSON) — `01_Casebook`'s STT step is generic, so its
-`stt_model` choice matters there.
+the instruction's JSON).
 
 ### Multi-STT instructions: independent slots
 
 An instruction can instead declare up to **3 independent STT slots**
-(`"use": "stt_slot"`, `"slot": 0`/`1`/`2` in its JSON — this is what
-`02_Radiology_Report_Assist_STT` uses). Each slot is configured separately via
-`stt_slots` — a list of `{model, api_key?, base_url?, language?}` — and can
-independently be local (a real model name) or external (`"openai:<model>"`),
-with its own provider/account. **1 to 3 slots may be configured**; an
-unconfigured or `null` slot is simply skipped, and the reconciling LLM step
-only sees whichever transcripts were actually produced.
+(`"use": "stt_slot"`, `"slot": 0`/`1`/`2` in its JSON). Each slot is configured
+separately via `stt_slots` — a list of `{model, api_key?, base_url?, language?}`
+— and can independently be local (a real model name) or external
+(`"openai:<model>"`), with its own provider/account. **1 to 3 slots may be
+configured**; an unconfigured or `null` slot is simply skipped, and the
+reconciling LLM step only sees whichever transcripts were actually produced.
 
 ```json
 {
@@ -100,10 +99,10 @@ would need its own integration, not just a new key.
 
 ### Multimodal LLM mode: skip STT, feed audio to the LLM directly
 
-BuAli (`02_Radiology_Report_Assist_STT`) also supports a second pipeline via
-`"stt_mode": "multimodal"` (default is `"separate"`, i.e. the STT-slots
-pipeline above) — no STT service call at all; the audio goes straight to an
-audio-capable LLM.
+An instruction can support a second pipeline via `"stt_mode": "multimodal"`
+(default is `"separate"`, i.e. the STT-slots pipeline above) — no STT service
+call at all; the audio goes straight to an audio-capable LLM. This needs an
+`"llm_audio"` step in the instruction's JSON.
 
 Three providers are supported, picked by `llm_model`'s prefix (or lack of
 one) — their call shapes are too different to share one path:
@@ -120,8 +119,7 @@ even though these models' own weights do. So Core_LLM runs a second, separate
 model-serving path just for this — `Core_LLM/deployment/multimodal.py` — with
 its own small registry (mirrors the STT module's swappable-model pattern,
 one model in memory at a time), exposed at `POST /chat_audio`. **The
-`llm_model` string here is the registry key that gets forwarded to Core_LLM**
-(unlike the old single-model version, it now matters which one you pick):
+`llm_model` string here is the registry key that gets forwarded to Core_LLM**:
 
 | Key | Model | Notes |
 |---|---|---|
@@ -153,13 +151,13 @@ Requirements, enforced at `POST /session` and again at `POST /run`:
   applicable to the local path, which always talks to `LLM_URL`.
 
 ```json
-{ "instruction": "02_radiology_report_assist_stt", "stt_mode": "multimodal",
+{ "instruction": "<instruction_id>", "stt_mode": "multimodal",
   "llm_model": "qwen3-omni-30b" }
 ```
 
 `GET /instructions/{id}` reports `"supports_multimodal_llm": true/false` so a
 client knows whether to offer this mode at all (only instructions with an
-`"llm_audio"` step support it; `01_Casebook` doesn't).
+`"llm_audio"` step support it).
 
 ### Hybrid mode: STT transcript(s) *and* audio, both given to the LLM
 
@@ -175,7 +173,7 @@ what gets returned; the STT transcript(s) are advisory input, not the
 answer.
 
 ```json
-{ "instruction": "02_radiology_report_assist_stt", "stt_mode": "hybrid",
+{ "instruction": "<instruction_id>", "stt_mode": "hybrid",
   "llm_model": "qwen3-omni-30b",
   "stt_slots": [{"model": "whisper"}] }
 ```
@@ -183,11 +181,11 @@ answer.
 Same requirements as `"multimodal"` (audio-capable `llm_model`, format
 restrictions) *plus* the same STT-slot requirements as `"separate"` (at
 least one configured slot, `MAX_STT_SLOTS` cap, local-STT reachability).
-`01_Casebook` and other `stt_mode`-unaware instructions are unaffected —
-this only applies to instructions with both `"stt_slot"` and `"llm_audio"`
-steps tagged for it (see below).
+Instructions without `stt_mode`-tagged steps are unaffected — this only
+applies to instructions with both `"stt_slot"` and `"llm_audio"` steps
+tagged for it (see below).
 
-Adding either mode to another instruction: give it a `"use": "llm_audio"`
+Adding either mode to an instruction: give it a `"use": "llm_audio"`
 step tagged `"run_when_stt_mode": ["multimodal", "hybrid"]`, tag its
 `"stt_slot"` steps `"run_when_stt_mode": ["separate", "hybrid"]`, and its
 purely-text `"llm"` reconcile step `"run_when_stt_mode": ["separate"]`
@@ -205,7 +203,7 @@ changes needed; this is just `OPENAI_BASE_URL`/`llm_base_url` pointed elsewhere.
 This "openai:" path is confirmed for plain text chat. GapGPT's catalog also
 lists Gemini "live"/"native-audio-dialog" models (their `GET /v1/models`
 shows `"supported_endpoint_types": ["gemini", "openai"]` for those) — these
-are the ones relevant to BuAli's `gemini:` multimodal path above, but the
+are the ones relevant to the `gemini:` multimodal path above, but the
 exact base URL/auth GapGPT expects for their Gemini-shaped endpoint (as
 opposed to the OpenAI-shaped one used for everything else) **hasn't been
 verified against their docs** — confirm before relying on it.
