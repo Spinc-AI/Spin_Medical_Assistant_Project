@@ -1,228 +1,91 @@
 # Orchestrator
 
-The brain of the assistant (v1, if/else). Talks to the user over HTTP and to the
-modules (STT, Core_LLM) over their HTTP APIs. It reads an **instruction** (a JSON
-workflow at `instruction/<NN_Name>/core_instruction.json`) and runs it: pick models
--> load them -> take audio or text -> (STT if audio) -> LLM fills the form.
+The HTTP front door in front of the assistant's **pipelines**. A pipeline is
+a plain Python module — no JSON instruction files, no generic step-loop
+reading them. Each one picks its own model(s) internally; that choice is
+never exposed to a caller of this API. STT and Core_LLM stay reachable on
+their own ports for direct testing, same as always — this service just
+coordinates them for a given pipeline.
 
-The BuAli and Casebook use cases that used to live here have been extracted
-into their own standalone projects (`Spin_BuAli`, `Spin_CaseBook`) — each with
-a hardcoded controller instead of a generic JSON instruction, for a simpler
-and faster single-purpose service. This engine remains available for *other*
-future use cases; `instruction/` is currently empty (`GET /instructions`
-returns `[]`) until a new one is added here.
+BuAli and Casebook, which used to live here as JSON instructions, have been
+extracted into their own standalone projects (`Spin_BuAli`, `Spin_CaseBook`).
+This engine is for other, future use cases.
 
 ## Run
 ```bash
 pip install -r requirements.txt
 ./run.sh          # Linux;  run.bat on Windows
 ```
-Serves on `0.0.0.0:9000` (docs at `/docs`). Set `STT_URL` / `LLM_URL` in `.env`.
-The module servers must already be running/reachable.
+Serves on `0.0.0.0:9000` (docs at `/docs`). Set `STT_URL` / `LLM_URL` in `.env`
+if the module servers aren't at the defaults (`:8000` / `:8001`).
 
 ## API
 | Method & path | Purpose |
 |---|---|
-| `GET /instructions` | list available instructions |
-| `GET /instructions/{id}` | full instruction detail (input.accepts, output.type) |
-| `GET /models` | proxies STT's available local models |
-| `GET /languages` | proxies STT's supported language codes |
 | `GET /health` | orchestrator + STT + LLM reachability |
-| `POST /session` | body `{instruction, stt_model, llm_model, language?, stt_api_key?, stt_base_url?, llm_api_key?, llm_base_url?, stt_slots?, stt_mode?}` -> load models, return status |
-| `GET /status` | current session / chosen models (never echoes any `*_api_key`, incl. inside `stt_slots`) |
-| `POST /run` | multipart: `file` (audio) **or** `text`, optional `language`/`stt_api_key`/`stt_base_url`/`llm_api_key`/`llm_base_url`/`stt_slots_json` override -> filled JSON |
-| `POST /session/unload` | unload models on the modules, end the session |
+| `GET /pipelines` | which pipelines exist, and what each does — no model details |
+| `POST /pipelines/{id}/run` | advance one pipeline's conversation by a turn |
 
-`language` (e.g. `"fa"`/`"en"`) only matters when the input is audio — it's
-forwarded to STT's `/transcribe`. Set a default in `/session`, optionally
-override per call in `/run`.
+`POST /pipelines/{id}/run` takes `{"history": [...], "text": "..."}` and
+returns whatever that pipeline defines as its result — see the pipeline's own
+module for the exact shape (`pipelines/greeting.py`'s is documented below).
+`history` is the conversation so far, in the exact shape the previous call
+returned it in (`[]` to start a new one); `text` is the newest message from
+the caller — omit it on the very first call to just get the pipeline's
+opening reply. **No field here selects a model.** That's deliberate: which
+model backs a pipeline is decided in that pipeline's own code
+(`pipelines/<name>.py`), not by whoever is calling this API.
 
-`stt_api_key`/`stt_base_url` and `llm_api_key`/`llm_base_url` are for
-external ("api") calls only — see below. They're **independent of each
-other** (STT and LLM can use different providers/accounts). Same pattern: a
-session default, optionally overridden per `/run` call.
+## Adding a pipeline
 
-## Typical sequence
-```bash
-curl -X POST http://193.93.169.134:9000/session -H "Content-Type: application/json"   -d '{"instruction":"<instruction_id>","stt_model":"whisper","llm_model":"aya-expanse-8b"}'
+Write `pipelines/<name>.py` exposing:
+- `ID`, `NAME`, `DESCRIPTION` — what `GET /pipelines` reports.
+- `run(messages: list[dict]) -> dict` — `messages` is the conversation so
+  far (`{"role": "user"|"assistant", "content": str}` dicts); return
+  whatever JSON-serializable result this pipeline produces. Raise on
+  failure — the API layer turns that into a `502`.
 
-curl -X POST http://193.93.169.134:9000/run -F "file=@clip.wav"
-# or:  curl -X POST http://193.93.169.134:9000/run -F "text=some input text"
+Then list its module in `pipelines/__init__.py`'s `_MODULES`. That's the only
+other file that needs to change; `main.py` and `module_clients.py` are
+generic across every pipeline.
 
-curl -X POST http://193.93.169.134:9000/session/unload
-```
+`module_clients.py` has the thin STT/Core_LLM HTTP wrappers a pipeline needs
+(`stt_transcribe`, `chat`, `llm_api_chat`, ...) plus the `"openai:<model>"`
+local-vs-cloud convention (`is_api_model`) for a pipeline that wants to pick
+a cloud model for itself. `OPENAI_API_KEY`/`OPENAI_BASE_URL` in `.env` are
+only a fallback default for that case — nothing here is caller-supplied.
 
-## Instructions
-Each instruction is a folder under `instruction/` holding a `core_instruction.json`
-(the workflow) plus its template(s). The folder name is the on-disk id and
-doesn't change; `"name"` inside `core_instruction.json` is what the UI shows.
-There are currently no instructions here — add a new folder + JSON to define
-one; the sections below describe the step types available for it.
+## `greeting` — the example pipeline
 
-## Local vs. API — models and providers
+Greets the patient and asks how it can help. It will only engage with two
+kinds of requests: a question about the Spin platform itself, or a medical
+concern. Anything else is politely refused. For a medical concern, it asks
+follow-up questions (symptoms, onset, duration, severity, ...) until it has
+enough to describe the situation, then returns a structured summary instead
+of another question.
 
-`stt_model` and `llm_model` support the same convention: prefix with `openai:`
-to route that step to the external API instead of the local service — e.g.
-`"stt_model": "openai:whisper-1"`, `"llm_model": "openai:gpt-4o-mini"`.
-Leaving off the prefix (`"whisper"`, `"aya-expanse-8b"`) uses the local module.
-This only applies to a **generic** step (`"use": "stt"` or `"use": "llm"` in
-the instruction's JSON).
-
-### Multi-STT instructions: independent slots
-
-An instruction can instead declare up to **3 independent STT slots**
-(`"use": "stt_slot"`, `"slot": 0`/`1`/`2` in its JSON). Each slot is configured
-separately via `stt_slots` — a list of `{model, api_key?, base_url?, language?}`
-— and can independently be local (a real model name) or external
-(`"openai:<model>"`), with its own provider/account. **1 to 3 slots may be
-configured**; an unconfigured or `null` slot is simply skipped, and the
-reconciling LLM step only sees whichever transcripts were actually produced.
-
+Each call returns:
 ```json
 {
-  "stt_slots": [
-    {"model": "whisper"},
-    {"model": "openai:whisper-1", "api_key": "sk-...", "base_url": "https://api.gapgpt.app/v1"},
-    null
-  ]
+  "reply": "<text to show the patient>",
+  "status": "in_progress" | "refused" | "complete",
+  "patient_situation": null | {
+    "chief_complaint": "...", "symptoms": ["..."], "onset": "...",
+    "duration": "...", "severity": "...", "associated_symptoms": ["..."],
+    "relevant_history": "...", "notes": "..."
+  }
 }
 ```
-(here slot 3 is skipped — only transcript_1 and transcript_2 get produced and reconciled)
+`patient_situation` is only ever non-null once `status` is `"complete"`.
 
-Local STT models are (re)loaded per-slot, per-call — since STT only holds one
-model in memory at a time, using two different local models across slots
-means it swaps between them during a single `/run` (slower, but correct).
+```bash
+curl -X POST http://localhost:9000/pipelines/greeting/run \
+  -H "Content-Type: application/json" -d '{"history": []}'
+# -> {"reply": "سلام! ...", "status": "in_progress", "patient_situation": null}
 
-Only OpenAI-compatible APIs are supported this way for now (same shape our own
-services already use). A differently-shaped provider (e.g. Google Cloud Speech)
-would need its own integration, not just a new key.
-
-### Multimodal LLM mode: skip STT, feed audio to the LLM directly
-
-An instruction can support a second pipeline via `"stt_mode": "multimodal"`
-(default is `"separate"`, i.e. the STT-slots pipeline above) — no STT service
-call at all; the audio goes straight to an audio-capable LLM. This needs an
-`"llm_audio"` step in the instruction's JSON.
-
-Three providers are supported, picked by `llm_model`'s prefix (or lack of
-one) — their call shapes are too different to share one path:
-
-| `llm_model` | Provider shape | Example |
-|---|---|---|
-| *(no prefix)* | **Local** — Core_LLM's `POST /chat_audio`, one of its registered models served directly via `transformers` (NOT Ollama — see below) | `"gemma-4-e4b"` or `"qwen3-omni-30b"` |
-| `openai:<model>` | OpenAI-compatible `POST /chat/completions` + `input_audio` content part | `"openai:gpt-4o-audio-preview"` |
-| `gemini:<model>` | Google's own `generateContent` API (`contents`/`parts`/`inline_data` + `systemInstruction`) | `"gemini:gemini-2.5-flash-preview-native-audio-dialog"` |
-
-**Why the local path isn't Ollama:** Ollama doesn't support audio input at
-all ([ollama/ollama#11798](https://github.com/ollama/ollama/issues/11798)),
-even though these models' own weights do. So Core_LLM runs a second, separate
-model-serving path just for this — `Core_LLM/deployment/multimodal.py` — with
-its own small registry (mirrors the STT module's swappable-model pattern,
-one model in memory at a time), exposed at `POST /chat_audio`. **The
-`llm_model` string here is the registry key that gets forwarded to Core_LLM**:
-
-| Key | Model | Notes |
-|---|---|---|
-| `gemma-4-e4b` (default) | `google/gemma-4-E4B-it` | Lighter, faster |
-| `gemma-4-12b` | `google/gemma-4-12B-it` | Largest **audio-capable** Gemma 4 (26B-A4B/31B have no audio input at all — image/video/text only) |
-| `qwen3-omni-30b` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | **Best tested option for Persian** — confirmed via [PARSA-Bench](https://arxiv.org/html/2603.14456), an independent Persian audio-LM benchmark (0.358 WER vs. 6-9 for Gemma-3n-class models). Needs real VRAM headroom. |
-
-This needs real GPU VRAM headroom; see `Core_LLM/deployment/requirements.txt`
-for the extra dependencies (`torch`, `transformers`, `accelerate`, etc.) this
-path pulls in beyond Core_LLM's normal Ollama-only footprint.
-
-Requirements, enforced at `POST /session` and again at `POST /run`:
-- For the two cloud prefixes, that provider's model must actually accept
-  audio input. For the local path, Core_LLM must be reachable (checked the
-  same way a normal local `llm_model` would be), and the key must be one
-  Core_LLM actually has registered (`GET /chat_audio/models` on Core_LLM).
-- The audio file's container format must be accepted by the chosen
-  provider — `openai:` only accepts `.wav`/`.mp3`; `gemini:` and the local
-  path accept a wider set (`.wav`/`.mp3`/`.aac`/`.ogg`/`.flac`/`.aiff` —
-  the local boundary is unverified against `transformers`' actual audio
-  loader, treated the same as Gemini's for now). Anything else is rejected
-  with a 400 before any API call is made.
-- `llm_base_url` must point at wherever the chosen cloud provider's endpoint
-  actually lives — for `gemini:`, that's Google's own API by default
-  (`GEMINI_BASE_URL`, defaults to `https://generativelanguage.googleapis.com/v1beta`)
-  or a proxy's Gemini-shaped endpoint (e.g. GapGPT's, if they expose one —
-  **verify the exact path/auth against the provider's docs**; this follows
-  Google's own documented request shape, but a proxy may differ). Not
-  applicable to the local path, which always talks to `LLM_URL`.
-
-```json
-{ "instruction": "<instruction_id>", "stt_mode": "multimodal",
-  "llm_model": "qwen3-omni-30b" }
+curl -X POST http://localhost:9000/pipelines/greeting/run \
+  -H "Content-Type: application/json" \
+  -d '{"history": [], "text": "I have had a headache since this morning"}'
 ```
-
-`GET /instructions/{id}` reports `"supports_multimodal_llm": true/false` so a
-client knows whether to offer this mode at all (only instructions with an
-`"llm_audio"` step support it).
-
-### Hybrid mode: STT transcript(s) *and* audio, both given to the LLM
-
-`"stt_mode": "hybrid"` combines the two pipelines above: one or more STT
-slots run (same as `"separate"` — at least one must be configured), **and**
-the audio-capable LLM is given the audio directly (same as `"multimodal"`) —
-but this time, whichever `transcript_N` the STT slot(s) produced is folded
-into the LLM's prompt as labeled reference material, explicitly framed as
-"may contain errors, cross-check against what you hear, don't treat as
-ground truth." This is for helping the LLM's own listening/judgment with a
-second opinion, not for replacing it — the LLM's own transcription is still
-what gets returned; the STT transcript(s) are advisory input, not the
-answer.
-
-```json
-{ "instruction": "<instruction_id>", "stt_mode": "hybrid",
-  "llm_model": "qwen3-omni-30b",
-  "stt_slots": [{"model": "whisper"}] }
-```
-
-Same requirements as `"multimodal"` (audio-capable `llm_model`, format
-restrictions) *plus* the same STT-slot requirements as `"separate"` (at
-least one configured slot, `MAX_STT_SLOTS` cap, local-STT reachability).
-Instructions without `stt_mode`-tagged steps are unaffected — this only
-applies to instructions with both `"stt_slot"` and `"llm_audio"` steps
-tagged for it (see below).
-
-Adding either mode to an instruction: give it a `"use": "llm_audio"`
-step tagged `"run_when_stt_mode": ["multimodal", "hybrid"]`, tag its
-`"stt_slot"` steps `"run_when_stt_mode": ["separate", "hybrid"]`, and its
-purely-text `"llm"` reconcile step `"run_when_stt_mode": ["separate"]`
-(steps without this key always run, so instructions that don't use
-`stt_mode` at all are unaffected).
-
-**Confirmed working:** [GapGPT](https://gapgpt.app) — an Iran-based, Rial-payable
-gateway that proxies GPT/Claude/Gemini through the exact OpenAI request shape
-(same `openai` Python SDK, `client.chat.completions.create(model=..., messages=...)`).
-Use `llm_base_url = "https://api.gapgpt.app/v1"` (or `https://api.gapapi.com/v1`
-for their external-CDN route) with a GapGPT API key, and any model name they
-proxy — e.g. `"llm_model": "openai:gpt-4o"`, `"openai:gemini-2.5-pro"`. No code
-changes needed; this is just `OPENAI_BASE_URL`/`llm_base_url` pointed elsewhere.
-
-This "openai:" path is confirmed for plain text chat. GapGPT's catalog also
-lists Gemini "live"/"native-audio-dialog" models (their `GET /v1/models`
-shows `"supported_endpoint_types": ["gemini", "openai"]` for those) — these
-are the ones relevant to the `gemini:` multimodal path above, but the
-exact base URL/auth GapGPT expects for their Gemini-shaped endpoint (as
-opposed to the OpenAI-shaped one used for everything else) **hasn't been
-verified against their docs** — confirm before relying on it.
-
-### API keys — not required to be preset, and independent per role
-
-External calls need a key, but it **does not have to live on the server**.
-Pass `stt_api_key`/`stt_base_url` and/or `llm_api_key`/`llm_base_url` in
-`POST /session` (session defaults) and/or `POST /run` (per-call overrides) —
-that's the normal way to supply them. They're kept **separate** on purpose:
-STT's external call and the LLM's external call can be entirely different
-providers or accounts (e.g. a different cloud STT service for STT, OpenAI for
-the LLM) — one is not required just because the other is set.
-
-`OPENAI_API_KEY`/`OPENAI_BASE_URL` in `.env` are only fallback defaults (e.g.
-for a shared admin key), used independently for whichever side is missing its
-own. If neither an explicit key nor that fallback is present when an external
-call actually runs, it fails with a clear error at that point — `POST
-/session` itself never requires a key, since starting a session doesn't need
-one yet.
-
-None of the `*_api_key` fields are ever echoed back by `GET /status`.
+Send the `reply` back as an `"assistant"` turn appended to `history` on the
+next call, to keep the conversation going.
