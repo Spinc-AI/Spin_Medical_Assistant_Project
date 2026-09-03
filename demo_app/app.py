@@ -42,7 +42,7 @@ except Exception as exc:  # missing PortAudio / no audio device — keep the app
     sd = None
     MIC_ERROR = exc
 
-DEFAULT_HOST = "94.184.177.150"
+DEFAULT_HOST = "localhost"
 TIMEOUT_SHORT = 15
 TIMEOUT_LOAD = 900   # model loading / inference can be slow -- must exceed Orchestrator's own
                       # internal HTTP_TIMEOUT (see Orchestrator/.env), or this becomes the
@@ -59,26 +59,11 @@ DEFAULT_CLOUD_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_CLOUD_STT_MODEL = "whisper-1"
 DEFAULT_CLOUD_LLM_MODEL = "gpt-4o-mini"
 FALLBACK_LANGUAGES = {"fa": "Persian", "en": "English"}  # used before/without a server round-trip
-MAX_STT_SLOTS = 3  # mirrors the orchestrator's MAX_STT_SLOTS — multi-STT instructions (e.g. radiology)
 # Core_LLM's registered local models (Core_LLM/deployment/model.py) -- all served
-# directly via transformers, not Ollama. One model is loaded at a time and serves
-# BOTH text-only chat and (if it supports_audio) BuAli's multimodal/hybrid pipelines,
-# so this single list covers every "Remote Local Model" dropdown in the app.
+# directly via transformers, not Ollama. One model is loaded at a time; this
+# list covers the "Remote Local Model" dropdown on the Core_LLM tab.
 LOCAL_LLM_MODELS = ["aya-expanse-8b", "aya-expanse-32b", "gemma-4-31b",
                     "gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]
-# Subset that actually accepts audio input -- used to filter the dropdown down
-# to valid choices whenever the pipeline mode needs an audio-capable model.
-# qwen3-omni-30b: best tested option for Persian audio (see Core_LLM's README).
-LOCAL_AUDIO_MODELS = ["gemma-4-e4b", "gemma-4-12b", "qwen3-omni-30b"]
-
-# The Orchestrator's per-instruction STT pipeline choice: "separate" (STT-slots
-# only), "multimodal" (audio straight to an audio-capable LLM, no STT), or
-# "hybrid" (both -- STT slot(s) run AND the LLM hears the audio directly, with
-# the STT transcript(s) folded in as reference material) -- see
-# supports_multimodal_llm from GET /instructions/{id}.
-SEPARATE_STT_LABEL = "Separate STT model(s)"
-MULTIMODAL_LLM_LABEL = "Multimodal LLM mode"
-HYBRID_LABEL = "Hybrid (STT + Multimodal LLM)"
 
 
 def cloud_transcribe(base_url, api_key, model, audio_bytes, filename, language=None):
@@ -147,82 +132,6 @@ class CloudFieldsFrame(ttk.Frame):
         self.base_url = tk.StringVar(value=DEFAULT_CLOUD_BASE_URL)
         ttk.Entry(self, textvariable=self.base_url, width=40).grid(
             row=1, column=1, columnspan=3, sticky="w", pady=(4, 0))
-
-
-class SttSlotWidget(ttk.Frame):
-    """One independently local-or-cloud STT engine slot: an explicit "Use this
-    slot" checkbox, a mode selector, and local dropdown / cloud fields. Up to
-    MAX_STT_SLOTS of these are used together for multi-STT instructions (e.g.
-    the radiology one) — each can be a totally different engine/provider."""
-
-    def __init__(self, parent, label_text, local_models_getter, on_refresh=None):
-        super().__init__(parent)
-        self._local_models_getter = local_models_getter  # callable -> current local model list
-        self._on_refresh = on_refresh                    # callable -> re-fetch from the server
-
-        self.enabled = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self, text="Use this slot", variable=self.enabled,
-                        command=self._update_visibility).grid(row=0, column=0, sticky="w")
-
-        self.mode = ModeSelector(self, label_text)
-        self.mode.grid(row=0, column=1, columnspan=3, sticky="w", padx=(10, 0))
-        self.mode.mode.trace_add("write", lambda *a: self._update_visibility())
-
-        self.local_model = tk.StringVar()
-        self.local_box = ttk.Combobox(self, textvariable=self.local_model, width=18, state="readonly")
-        self.refresh_btn = ttk.Button(self, text="Refresh", command=self._refresh_clicked)
-
-        self.cloud = CloudFieldsFrame(self, DEFAULT_CLOUD_STT_MODEL)
-
-        self._update_visibility()
-
-    def refresh_local_models(self):
-        models = self._local_models_getter()
-        self.local_box["values"] = models
-        if self.local_model.get() not in models and models:
-            self.local_model.set(models[0])
-
-    def _refresh_clicked(self):
-        if self._on_refresh:
-            self._on_refresh()
-
-    def _update_visibility(self):
-        if not self.enabled.get():
-            self.local_box.grid_remove()
-            self.refresh_btn.grid_remove()
-            self.cloud.grid_remove()
-            return
-        if self.mode.is_cloud():
-            self.local_box.grid_remove()
-            self.refresh_btn.grid_remove()
-            self.cloud.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        else:
-            self.cloud.grid_remove()
-            self.local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
-            self.refresh_btn.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(4, 0))
-
-    def is_cloud(self):
-        return self.mode.is_cloud()
-
-    def effective_model(self):
-        if self.is_cloud():
-            return "openai:" + self.cloud.model.get().strip()
-        return self.local_model.get().strip()
-
-    def as_slot_config(self):
-        """Return a dict matching the backend's stt_slots entry shape, or None
-        if this slot is unchecked (skipped)."""
-        if not self.enabled.get():
-            return None
-        cfg = {"model": self.effective_model()}
-        if self.is_cloud():
-            key = self.cloud.api_key.get().strip()
-            base = self.cloud.base_url.get().strip()
-            if key:
-                cfg["api_key"] = key
-            if base:
-                cfg["base_url"] = base
-        return cfg
 
 
 class MicRecorder:
@@ -801,511 +710,126 @@ class LLMTab(ttk.Frame):
 # Orchestrator tab
 # ---------------------------------------------------------------------------
 class OrchestratorTab(ttk.Frame):
+    """A chat client for the orchestrator's pipeline API: pick a pipeline,
+    talk to it, watch it hand back a reply and — once it has one — a
+    structured result. No model fields anywhere here: which model backs a
+    pipeline is the orchestrator's own choice now, not something this UI
+    (or any other caller) gets to set."""
+
     def __init__(self, parent):
         super().__init__(parent, padding=10)
-        self._instruction_ids = []
-        self._accepts = []
-        self.language_var = tk.StringVar()
-        self.language_box = None  # only created when the active instruction accepts audio
-        self._language_codes = []
-        self._language_labels = []
-        self._language_default_idx = 0
-        self._always_uses_stt_api = False   # instruction has an unconditional "stt_api" step
-        self._stt_model_is_choice = True    # instruction has a generic "stt" step (local-vs-cloud matters)
-        self._stt_slot_count = 0            # >0 for multi-STT instructions (e.g. radiology) — see stt_slot_widgets
-        self._local_stt_models = []
-        self._supports_multimodal_llm = False  # instruction has an "llm_audio" step (see pipeline dropdown)
+        self._pipeline_ids = []
+        self._pipelines_info = {}
+        self.history = []  # [{"role": "user"|"assistant", "content": str}, ...]
 
         self.conn = ConnectionBar(self, default_port=9000, health_path="/health")
         self.conn.grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 10))
 
-        ttk.Label(self, text="Instruction:").grid(row=1, column=0, sticky="w")
-        self.instruction = tk.StringVar()
-        self.instruction_box = ttk.Combobox(self, textvariable=self.instruction, width=28, state="readonly")
-        self.instruction_box.grid(row=1, column=1, sticky="w")
-        self.instruction_box.bind("<<ComboboxSelected>>", lambda e: self.on_instruction_change())
-        ttk.Button(self, text="Refresh", command=self.refresh_instructions).grid(row=1, column=2, sticky="w", padx=4)
+        ttk.Label(self, text="Pipeline:").grid(row=1, column=0, sticky="w")
+        self.pipeline = tk.StringVar()
+        self.pipeline_box = ttk.Combobox(self, textvariable=self.pipeline, width=28, state="readonly")
+        self.pipeline_box.grid(row=1, column=1, sticky="w")
+        self.pipeline_box.bind("<<ComboboxSelected>>", lambda e: self.new_conversation())
+        ttk.Button(self, text="Refresh", command=self.refresh_pipelines).grid(row=1, column=2, sticky="w", padx=4)
+        ttk.Button(self, text="New conversation", command=self.new_conversation).grid(row=1, column=3, sticky="w")
 
-        # Only shown for instructions that support it (supports_multimodal_llm):
-        # skip STT entirely and feed audio straight to a cloud audio-capable LLM.
-        self.pipeline_label = ttk.Label(self, text="Pipeline:")
-        self.pipeline_mode = tk.StringVar(value=SEPARATE_STT_LABEL)
-        self.pipeline_box = ttk.Combobox(self, textvariable=self.pipeline_mode, width=22, state="readonly",
-                                         values=[SEPARATE_STT_LABEL, MULTIMODAL_LLM_LABEL, HYBRID_LABEL])
-        self.pipeline_label.grid(row=1, column=3, sticky="w", padx=(12, 0))
-        self.pipeline_box.grid(row=1, column=4, sticky="w")
-        self.pipeline_label.grid_remove()
-        self.pipeline_box.grid_remove()
-        self.pipeline_mode.trace_add("write", lambda *a: self._on_pipeline_mode_change())
+        self.description = ttk.Label(self, foreground="gray", wraplength=640, justify="left")
+        self.description.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
-        # --- STT section: source choice comes BEFORE the model itself, per-instruction ---
-        self.stt_frame = ttk.Frame(self)
-        self.stt_frame.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ttk.Label(self, text="Conversation:").grid(row=3, column=0, sticky="nw", pady=(10, 0))
+        self.transcript = OutputBox(self, height=16)
+        self.transcript.grid(row=4, column=0, columnspan=4, pady=4)
 
-        self.stt_mode = ModeSelector(self.stt_frame, "STT source:")
-        self.stt_mode.mode.trace_add("write", lambda *a: self._update_stt_section())
+        ttk.Label(self, text="Message:").grid(row=5, column=0, sticky="nw")
+        self.message_input = scrolledtext.ScrolledText(self, width=60, height=3, wrap="word")
+        self.message_input.grid(row=5, column=1, columnspan=2, sticky="w")
+        ttk.Button(self, text="Send", command=self.send).grid(row=5, column=3, sticky="nw")
 
-        self.stt_info_label = ttk.Label(
-            self.stt_frame, foreground="gray",
-            text="(this instruction always uses BOTH local and cloud STT)")
+        ttk.Label(self, text="Result:").grid(row=6, column=0, sticky="nw", pady=(10, 0))
+        self.result_box = OutputBox(self, height=8)
+        self.result_box.grid(row=7, column=0, columnspan=4, pady=4)
 
-        self.stt_local_model = tk.StringVar(value="whisper")
-        self.stt_local_box = ttk.Combobox(self.stt_frame, textvariable=self.stt_local_model,
-                                          width=18, state="readonly")
-        self.stt_local_refresh_btn = ttk.Button(self.stt_frame, text="Refresh", command=self.refresh_models)
+        self.refresh_pipelines()
 
-        self.stt_cloud = CloudFieldsFrame(self.stt_frame, DEFAULT_CLOUD_STT_MODEL)
+    def refresh_pipelines(self):
+        run_bg(self._refresh_pipelines_bg)
 
-        # Multi-STT instructions (stt_slot_count > 0, e.g. radiology): up to
-        # MAX_STT_SLOTS independent slots instead of the single choice above.
-        self.stt_slot_widgets = [
-            SttSlotWidget(self.stt_frame, f"STT slot {i + 1} source:",
-                         lambda: self._local_stt_models, on_refresh=self.refresh_models)
-            for i in range(MAX_STT_SLOTS)
-        ]
+    def _refresh_pipelines_bg(self):
+        try:
+            r = requests.get(f"{self.conn.base_url}/pipelines", timeout=TIMEOUT_SHORT)
+            r.raise_for_status()
+            self.after(0, self._apply_pipelines, r.json())
+        except requests.RequestException as exc:
+            self.after(0, messagebox.showerror, "Orchestrator", f"Could not fetch pipelines: {error_detail(exc)}")
 
-        # --- LLM section: same pattern, always a real choice (no "always both" case) ---
-        self.llm_frame = ttk.Frame(self)
-        self.llm_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
+    def _apply_pipelines(self, items):
+        self._pipelines_info = {i["id"]: i for i in items}
+        self._pipeline_ids = list(self._pipelines_info)
+        self.pipeline_box["values"] = [f"{i['id']} - {i['name']}" for i in items]
+        if self._pipeline_ids:
+            self.pipeline_box.current(0)
+            self.new_conversation()
 
-        self.llm_mode = ModeSelector(self.llm_frame, "LLM source:")
-        self.llm_mode.grid(row=0, column=0, columnspan=4, sticky="w")
-        self.llm_mode.mode.trace_add("write", lambda *a: self._update_llm_section())
+    def _selected_pipeline_id(self):
+        idx = self.pipeline_box.current()
+        return self._pipeline_ids[idx] if 0 <= idx < len(self._pipeline_ids) else None
 
-        # One dropdown for every "Remote Local Model" case -- separate mode
-        # (any of the 6), multimodal/hybrid mode (filtered to the audio-capable
-        # 3 in _update_llm_section, since only one model is loaded at a time
-        # and it serves both text and audio roles regardless of which endpoint
-        # a request came in through).
-        self.llm_local_model = tk.StringVar(value=LOCAL_LLM_MODELS[0])
-        self.llm_local_box = ttk.Combobox(self.llm_frame, textvariable=self.llm_local_model,
-                                          width=18, state="readonly", values=LOCAL_LLM_MODELS)
-
-        self.llm_cloud = CloudFieldsFrame(self.llm_frame, DEFAULT_CLOUD_LLM_MODEL)
-        self.multimodal_hint = ttk.Label(
-            self.llm_frame, foreground="gray", justify="left", wraplength=640,
-            text="Local: served via Core_LLM's /chat_audio (not Ollama, which can't take audio) — "
-                 "qwen3-omni-30b is the best tested option for Persian. Cloud: for a Gemini audio "
-                 "model (e.g. via GapGPT), prefix Cloud model with \"gemini:\" — e.g. "
-                 "gemini:gemini-2.5-flash-preview-native-audio-dialog")
-
-        ttk.Button(self, text="Start session", command=self.start_session).grid(row=4, column=0, sticky="w", pady=10)
-        ttk.Button(self, text="Unload session", command=self.unload_session).grid(row=4, column=1, sticky="w")
-        self.session_status = ttk.Label(self, text="session: none")
-        self.session_status.grid(row=5, column=0, columnspan=4, sticky="w")
-
-        # Rebuilt per-instruction: audio Browse and/or a text box, per input.accepts.
-        self.input_area = ttk.Frame(self)
-        self.input_area.grid(row=6, column=0, columnspan=4, sticky="w", pady=10)
-        self.file_path = tk.StringVar()
-        self.text_input = None
-
-        ttk.Button(self, text="Run", command=self.run).grid(row=7, column=0, sticky="w", pady=(0, 10))
-
-        ttk.Label(self, text="Output:").grid(row=8, column=0, sticky="nw")
-        self.output = OutputBox(self, height=14)
-        self.output.grid(row=9, column=0, columnspan=4, pady=4)
-
-        self._last_audio_path = ""
-        self._last_model_parts = []
-        self.saver = TranscriptSaver(self, self._transcript_parts)
-        self.saver.grid(row=10, column=0, columnspan=4, sticky="w", pady=(4, 0))
-
-        self._update_stt_section()
-        self._update_llm_section()
-        self.refresh_instructions()
-        self.refresh_languages()
-        self.refresh_models()
-
-    def _transcript_parts(self):
-        return self.output.get("1.0", tk.END).strip(), self._last_audio_path, self._last_model_parts
-
-    # --- STT section: multi-slot (if the instruction supports it), else the
-    # older mode-selector-or-"always both" single-choice UI. ---
-    def _is_multimodal(self):
-        return self._supports_multimodal_llm and self.pipeline_mode.get() == MULTIMODAL_LLM_LABEL
-
-    def _is_hybrid(self):
-        return self._supports_multimodal_llm and self.pipeline_mode.get() == HYBRID_LABEL
-
-    def _uses_llm_audio(self):
-        """Multimodal or hybrid -- either way the LLM needs audio-capable handling."""
-        return self._is_multimodal() or self._is_hybrid()
-
-    def _on_pipeline_mode_change(self):
-        self._update_stt_section()
-        self._update_llm_section()
-
-    def _update_stt_section(self):
-        for w in (self.stt_mode, self.stt_info_label, self.stt_local_box,
-                 self.stt_local_refresh_btn, self.stt_cloud):
-            w.grid_remove()
-        for w in self.stt_slot_widgets:
-            w.grid_remove()
-
-        if self._is_multimodal():
-            # No STT at all in this mode — audio goes straight to the LLM.
-            # Collapse the WHOLE frame (not just its children), or the row it
-            # occupies keeps reserving space for whatever was shown last time
-            # (e.g. 3 stacked STT slot widgets), leaving a large empty gap
-            # above the LLM section.
-            self.stt_frame.grid_remove()
+    def new_conversation(self):
+        pid = self._selected_pipeline_id()
+        if pid is None:
             return
-        self.stt_frame.grid()
+        self.description.config(text=self._pipelines_info.get(pid, {}).get("description", ""))
+        self.history = []
+        self.transcript.write("")
+        self.result_box.write("")
+        self._send(pid, {"history": []})
 
-        if self._stt_slot_count > 0:
-            for i in range(self._stt_slot_count):
-                self.stt_slot_widgets[i].grid(row=i, column=0, columnspan=4, sticky="w",
-                                              pady=(0 if i == 0 else 6, 0))
-        elif self._stt_model_is_choice:
-            self.stt_mode.grid(row=0, column=0, columnspan=4, sticky="w")
-            if self.stt_mode.is_cloud():
-                self.stt_cloud.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
-            else:
-                self.stt_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
-                self.stt_local_refresh_btn.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(4, 0))
-        else:
-            # This instruction has an unconditional "stt_local" + "stt_api" pair —
-            # no real choice, both always run.
-            self.stt_info_label.grid(row=0, column=0, columnspan=4, sticky="w")
-            self.stt_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
-            self.stt_local_refresh_btn.grid(row=1, column=1, sticky="w", padx=(4, 0), pady=(4, 0))
-            self.stt_cloud.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-
-    def _update_llm_section(self):
-        # Multimodal/hybrid modes can use EITHER a local audio-capable model
-        # (Core_LLM's /chat_audio) or a cloud one ("openai:"/"gemini:" prefix)
-        # — Ollama itself still can't take audio, but Core_LLM's own local
-        # models are served via transformers directly, not Ollama, so local
-        # is a real option here.
-        self.llm_mode.box.config(state="readonly")
-
-        # Same one dropdown either way -- just filter its values down to the
-        # audio-capable subset when the pipeline mode needs that, so you can't
-        # pick a combination that'll just error out server-side.
-        wanted_values = LOCAL_AUDIO_MODELS if self._uses_llm_audio() else LOCAL_LLM_MODELS
-        if list(self.llm_local_box["values"]) != wanted_values:
-            self.llm_local_box["values"] = wanted_values
-            if self.llm_local_model.get() not in wanted_values:
-                self.llm_local_model.set(wanted_values[0])
-
-        if self.llm_mode.is_cloud():
-            self.llm_local_box.grid_remove()
-            self.llm_cloud.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        else:
-            self.llm_cloud.grid_remove()
-            self.llm_local_box.grid(row=1, column=0, sticky="w", pady=(4, 0))
-
-        if self._uses_llm_audio():
-            self.multimodal_hint.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        else:
-            self.multimodal_hint.grid_remove()
-
-    def _stt_cloud_active(self):
-        """Whether the STT cloud fields are relevant right now (chosen, or always-on)."""
-        return (not self._stt_model_is_choice) or self.stt_mode.is_cloud()
-
-    def _llm_cloud_active(self):
-        return self.llm_mode.is_cloud()
-
-    def _effective_stt_model(self):
-        if self._stt_model_is_choice and self.stt_mode.is_cloud():
-            return "openai:" + self.stt_cloud.model.get().strip()
-        return self.stt_local_model.get().strip()
-
-    def _effective_llm_model(self):
-        if self.llm_mode.is_cloud():
-            model = self.llm_cloud.model.get().strip()
-            # Multimodal LLM mode may need a non-OpenAI-shaped provider (e.g.
-            # "gemini:..." for Gemini's own audio API) — an explicit prefix
-            # passes through untouched; anything else still defaults to "openai:".
-            if model.startswith("openai:") or model.startswith("gemini:"):
-                return model
-            return "openai:" + model
-        return self.llm_local_model.get().strip()
-
-    def refresh_models(self):
-        run_bg(self._refresh_models_bg)
-
-    def _refresh_models_bg(self):
-        try:
-            r = requests.get(f"{self.conn.base_url}/models", timeout=TIMEOUT_SHORT)
-            r.raise_for_status()
-            self._local_stt_models = r.json().get("available", [])
-            self.after(0, self._apply_stt_model_options)
-        except requests.RequestException as exc:
-            self.after(0, messagebox.showerror, "Orchestrator",
-                      f"Could not fetch local STT models: {error_detail(exc)}")
-
-    def _apply_stt_model_options(self):
-        self.stt_local_box["values"] = self._local_stt_models
-        if self.stt_local_model.get() not in self._local_stt_models and self._local_stt_models:
-            self.stt_local_model.set(self._local_stt_models[0])
-        for w in self.stt_slot_widgets:
-            w.refresh_local_models()
-
-    def refresh_languages(self):
-        run_bg(self._refresh_languages_bg)
-
-    def _refresh_languages_bg(self):
-        try:
-            r = requests.get(f"{self.conn.base_url}/languages", timeout=TIMEOUT_SHORT)
-            r.raise_for_status()
-            data = r.json()
-            available = data.get("available", {})
-            self._language_codes = list(available.keys())
-            self._language_labels = [f"{c} - {n}" for c, n in available.items()]
-            default = data.get("default")
-            self._language_default_idx = (
-                self._language_codes.index(default) if default in self._language_codes else 0
-            )
-            self.after(0, self._apply_language_widget)
-        except requests.RequestException:
-            pass  # language picker is optional — STT falls back to its own default
-
-    def _apply_language_widget(self):
-        if self.language_box is not None:
-            self.language_box["values"] = self._language_labels
-            if self._language_labels:
-                self.language_box.current(self._language_default_idx)
-
-    def _selected_language(self):
-        if self.language_box is None:
-            return None
-        idx = self.language_box.current()
-        return self._language_codes[idx] if 0 <= idx < len(self._language_codes) else None
-
-    def refresh_instructions(self):
-        run_bg(self._refresh_instructions_bg)
-
-    def _refresh_instructions_bg(self):
-        try:
-            r = requests.get(f"{self.conn.base_url}/instructions", timeout=TIMEOUT_SHORT)
-            r.raise_for_status()
-            self.after(0, self._apply_instructions, r.json().get("instructions", []))
-        except requests.RequestException as exc:
-            self.after(0, messagebox.showerror, "Orchestrator", f"Could not fetch instructions: {error_detail(exc)}")
-
-    def _apply_instructions(self, items):
-        self._instruction_ids = [i["id"] for i in items]
-        self.instruction_box["values"] = [f"{i['id']} - {i.get('name', '')}" for i in items]
-        if self._instruction_ids:
-            self.instruction_box.current(0)
-            self.on_instruction_change()
-
-    def on_instruction_change(self):
-        idx = self.instruction_box.current()
-        if 0 <= idx < len(self._instruction_ids):
-            run_bg(self._fetch_instruction_bg, self._instruction_ids[idx])
-
-    def _fetch_instruction_bg(self, instr_id):
-        try:
-            r = requests.get(f"{self.conn.base_url}/instructions/{instr_id}", timeout=TIMEOUT_SHORT)
-            r.raise_for_status()
-            self.after(0, self._rebuild_input_area, r.json())
-        except requests.RequestException as exc:
-            self.after(0, messagebox.showerror, "Orchestrator", f"Could not fetch instruction: {error_detail(exc)}")
-
-    def _rebuild_input_area(self, instruction):
-        """Show a Browse button and/or a text box, matching input.accepts for this instruction."""
-        for w in self.input_area.winfo_children():
-            w.destroy()
-        self.text_input = None
-        self.language_box = None
-        self._accepts = instruction.get("input", {}).get("accepts", [])
-        self._always_uses_stt_api = instruction.get("always_uses_stt_api", False)
-        self._stt_model_is_choice = instruction.get("stt_model_is_choice", True)
-        self._stt_slot_count = min(instruction.get("stt_slot_count", 0), MAX_STT_SLOTS)
-        self._supports_multimodal_llm = instruction.get("supports_multimodal_llm", False)
-        if self._supports_multimodal_llm:
-            self.pipeline_label.grid()
-            self.pipeline_box.grid()
-        else:
-            self.pipeline_mode.set(SEPARATE_STT_LABEL)
-            self.pipeline_label.grid_remove()
-            self.pipeline_box.grid_remove()
-        self._apply_stt_model_options()
-        self._update_stt_section()
-        self._update_llm_section()
-
-        row = 0
-        if "audio" in self._accepts:
-            self.file_path.set("")
-            ttk.Label(self.input_area, text="Audio file:").grid(row=row, column=0, sticky="w")
-            ttk.Entry(self.input_area, textvariable=self.file_path, width=40, state="readonly").grid(
-                row=row, column=1, sticky="w")
-            ttk.Button(self.input_area, text="Browse...", command=self.browse).grid(row=row, column=2, sticky="w")
-            RecordButton(self.input_area, self.file_path).grid(row=row, column=3, sticky="w", padx=4)
-            ttk.Label(self.input_area, text="Language:").grid(row=row, column=4, sticky="w", padx=(8, 0))
-            self.language_box = ttk.Combobox(self.input_area, textvariable=self.language_var,
-                                             width=14, state="readonly")
-            self.language_box.grid(row=row, column=5, sticky="w")
-            self._apply_language_widget()
-            row += 1
-        if "text" in self._accepts:
-            ttk.Label(self.input_area, text="Text:").grid(row=row, column=0, sticky="nw")
-            self.text_input = scrolledtext.ScrolledText(self.input_area, width=60, height=4, wrap="word")
-            self.text_input.grid(row=row, column=1, columnspan=2, sticky="w")
-            row += 1
-        if not self._accepts:
-            ttk.Label(self.input_area, text="(this instruction takes no direct input)").grid(row=0, column=0, sticky="w")
-
-    def browse(self):
-        path = filedialog.askopenfilename(title="Choose an audio file", filetypes=AUDIO_FILETYPES)
-        if path:
-            self.file_path.set(path)
-
-    def start_session(self):
-        idx = self.instruction_box.current()
-        if idx < 0:
-            messagebox.showwarning("Orchestrator", "Pick an instruction first.")
+    def send(self):
+        text = self.message_input.get("1.0", tk.END).strip()
+        if not text:
             return
-        payload = {"instruction": self._instruction_ids[idx], "llm_model": self._effective_llm_model()}
-
-        if self._is_multimodal():
-            payload["stt_mode"] = "multimodal"
-            key = self.llm_cloud.api_key.get().strip()
-            if key:
-                payload["llm_api_key"] = key
-            base = self.llm_cloud.base_url.get().strip()
-            if base:
-                payload["llm_base_url"] = base
-            self.session_status.config(text="starting session...")
-            run_bg(self._start_session_bg, payload)
+        pid = self._selected_pipeline_id()
+        if pid is None:
+            messagebox.showwarning("Orchestrator", "Pick a pipeline first.")
             return
+        self.message_input.delete("1.0", tk.END)
+        self._append_line(f"You: {text}")
+        self._send(pid, {"history": self.history, "text": text})
 
-        if self._is_hybrid():
-            # Same as separate mode below (STT slots + generic LLM key/base
-            # handling) -- just tags the session so Orchestrator ALSO feeds
-            # the audio itself to the LLM, alongside whichever transcripts
-            # the STT slot(s) below produce. No early return.
-            payload["stt_mode"] = "hybrid"
+    def _send(self, pipeline_id, payload):
+        run_bg(self._send_bg, pipeline_id, payload)
 
-        if self._stt_slot_count > 0:
-            slots = [w.as_slot_config() for w in self.stt_slot_widgets[:self._stt_slot_count]]
-            if not any(slots):
-                messagebox.showwarning("Orchestrator", "Enable at least one STT slot.")
-                return
-            payload["stt_slots"] = slots
-            payload["stt_model"] = ""  # unused by slot-based instructions
-        else:
-            payload["stt_model"] = self._effective_stt_model()
-            if self._stt_cloud_active():
-                key = self.stt_cloud.api_key.get().strip()
-                if key:
-                    payload["stt_api_key"] = key
-                base = self.stt_cloud.base_url.get().strip()
-                if base:
-                    payload["stt_base_url"] = base
-
-        if self._llm_cloud_active():
-            key = self.llm_cloud.api_key.get().strip()
-            if key:
-                payload["llm_api_key"] = key
-            base = self.llm_cloud.base_url.get().strip()
-            if base:
-                payload["llm_base_url"] = base
-        self.session_status.config(text="starting session...")
-        run_bg(self._start_session_bg, payload)
-
-    def _start_session_bg(self, payload):
+    def _send_bg(self, pipeline_id, payload):
         try:
-            r = requests.post(f"{self.conn.base_url}/session", json=payload, timeout=TIMEOUT_LOAD)
+            r = requests.post(f"{self.conn.base_url}/pipelines/{pipeline_id}/run",
+                              json=payload, timeout=TIMEOUT_LOAD)
             r.raise_for_status()
-            data = r.json()
-            text = (f"session: {data.get('instruction')}  "
-                    f"(stt={data.get('stt_model')}, llm={data.get('llm_model')})")
-            self.after(0, self.session_status.config, {"text": text})
+            self.after(0, self._apply_reply, payload, r.json())
         except requests.RequestException as exc:
-            self.after(0, self.session_status.config, {"text": f"session failed: {error_detail(exc)}"})
+            self.after(0, self._append_line, f"Error: {error_detail(exc)}")
 
-    def run(self):
-        path = self.file_path.get() if "audio" in self._accepts else ""
-        text = self.text_input.get("1.0", tk.END).strip() if self.text_input else ""
-        language = self._selected_language()
+    def _apply_reply(self, payload, body):
+        reply = body.get("reply", "")
+        if payload.get("text"):
+            self.history.append({"role": "user", "content": payload["text"]})
+        if reply:
+            self.history.append({"role": "assistant", "content": reply})
+            self._append_line(f"Assistant: {reply}")
 
-        if not path and not text:
-            messagebox.showwarning("Orchestrator", "Provide audio or text first.")
-            return
+        status = body.get("status")
+        if status:
+            self._append_line(f"[{status}]")
 
-        if self._is_multimodal():
-            # No STT at all — audio goes straight to the LLM (local or cloud,
-            # per _update_llm_section). Nothing here needs stt_slots_json.
-            # (Hybrid mode falls through to the STT-slot logic below instead,
-            # since it needs both stt_slots_json AND the audio file.)
-            llm_key = self.llm_cloud.api_key.get().strip()
-            llm_base = self.llm_cloud.base_url.get().strip()
-            self.output.write("running...")
-            self._last_audio_path = path
-            self._last_model_parts = [self._effective_llm_model()]
-            if path:
-                self.saver.note_audio_path(path)
-            run_bg(self._run_bg, path, text, language, "", "", llm_key, llm_base, None)
-            return
+        # Whatever the pipeline returned beyond reply/status (e.g. greeting's
+        # patient_situation) — shown as-is, since each pipeline's result shape
+        # is its own business, not something this generic tab needs to know.
+        extra = {k: v for k, v in body.items() if k not in ("reply", "status")}
+        if any(v is not None for v in extra.values()):
+            self.result_box.write(json.dumps(extra, indent=2, ensure_ascii=False))
 
-        stt_key = stt_base = ""
-        stt_slots_json = None
-        stt_model_parts = []
-        if self._stt_slot_count > 0:
-            slots = [w.as_slot_config() for w in self.stt_slot_widgets[:self._stt_slot_count]]
-            stt_slots_json = json.dumps(slots)
-            stt_model_parts = [s.get("model") if s else None for s in slots]
-        else:
-            stt_key = self.stt_cloud.api_key.get().strip() if self._stt_cloud_active() else ""
-            stt_base = self.stt_cloud.base_url.get().strip() if self._stt_cloud_active() else ""
-            stt_model_parts = [self._effective_stt_model()]
-
-        llm_key = self.llm_cloud.api_key.get().strip() if self._llm_cloud_active() else ""
-        llm_base = self.llm_cloud.base_url.get().strip() if self._llm_cloud_active() else ""
-        self.output.write("running...")
-        self._last_audio_path = path
-        self._last_model_parts = stt_model_parts + [self._effective_llm_model()]
-        if path:
-            self.saver.note_audio_path(path)
-        run_bg(self._run_bg, path, text, language, stt_key, stt_base, llm_key, llm_base, stt_slots_json)
-
-    def _run_bg(self, path, text, language, stt_key, stt_base, llm_key, llm_base, stt_slots_json):
-        f = None
-        try:
-            files = None
-            data = {}
-            if path:
-                f = open(path, "rb")
-                files = {"file": (os.path.basename(path), f)}
-            else:
-                data["text"] = text
-            if language:
-                data["language"] = language
-            if stt_key:
-                data["stt_api_key"] = stt_key
-            if stt_base:
-                data["stt_base_url"] = stt_base
-            if llm_key:
-                data["llm_api_key"] = llm_key
-            if llm_base:
-                data["llm_base_url"] = llm_base
-            if stt_slots_json:
-                data["stt_slots_json"] = stt_slots_json
-            r = requests.post(f"{self.conn.base_url}/run", files=files, data=data or None, timeout=TIMEOUT_LOAD)
-            r.raise_for_status()
-            pretty = json.dumps(r.json(), indent=2, ensure_ascii=False)
-            self.after(0, self.output.write, pretty)
-        except requests.RequestException as exc:
-            self.after(0, self.output.write, f"Error: {error_detail(exc)}")
-        finally:
-            if f:
-                f.close()
-
-    def unload_session(self):
-        run_bg(self._unload_session_bg)
-
-    def _unload_session_bg(self):
-        try:
-            r = requests.post(f"{self.conn.base_url}/session/unload", timeout=TIMEOUT_SHORT)
-            r.raise_for_status()
-            self.after(0, self.session_status.config, {"text": "session: none"})
-        except requests.RequestException as exc:
-            self.after(0, messagebox.showerror, "Orchestrator", f"Unload failed: {error_detail(exc)}")
+    def _append_line(self, line):
+        current = self.transcript.get("1.0", tk.END).rstrip("\n")
+        self.transcript.write(f"{current}\n{line}" if current else line)
 
 
 class DemoApp(tk.Tk):
