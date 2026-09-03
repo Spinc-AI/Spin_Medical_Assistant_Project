@@ -1,0 +1,25 @@
+# AI_Service module
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Evaluation output — run artefacts, and a run against real conversations
+# would contain patient-supplied text. Keep the folder, never the contents.
+evaluation/results/*
+!evaluation/results/.gitkeep
+
+# No real patient data (PHI) — see CONTRIBUTING.md
+*.phi.json

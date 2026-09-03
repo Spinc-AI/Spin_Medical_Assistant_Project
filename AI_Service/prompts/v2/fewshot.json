@@ -1,0 +1,24 @@
+{
+  "version": "v2",
+  "description": "Few-shot turns for the v2 (batched, numbered-list) eye interview. Fewer examples than v1 by design -- v2's whole premise is that one turn covers several slots, so a two-example conversation already reaches the summary. The second example carries the urgent case.",
+  "examples": [
+    {
+      "user": "چشمم اذیت می‌کند.",
+      "assistant": {
+        "domain": "eye",
+        "model": "gemma-4-12b",
+        "question": "برای اینکه وضعیت را دقیق ثبت کنم، لطفاً به این سه مورد پاسخ دهید:\n۱. از چه زمانی شروع شده و ناگهانی بود یا تدریجی؟\n۲. آیا چشم قرمز شده است؟ قرمزی خفیف است یا شدید؟\n۳. آیا در دید شما تغییری ایجاد شده — تاری، دوبینی یا کاهش دید؟",
+        "urgency": "routine"
+      }
+    },
+    {
+      "user": "از دیشب ناگهانی شروع شد، چشمم خیلی قرمز است و دیدم را تقریباً از دست داده‌ام.",
+      "assistant": {
+        "domain": "eye",
+        "model": "gemma-4-12b",
+        "question": "ثبت شد: شروع ناگهانی از دیشب، قرمزی شدید، و کاهش شدید دید. از دست رفتن ناگهانی دید وضعیتی فوری است و باید همین حالا به اورژانس چشم مراجعه کنید.",
+        "urgency": "urgent"
+      }
+    }
+  ]
+}

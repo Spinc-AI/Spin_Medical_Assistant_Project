@@ -1,0 +1,128 @@
+{
+  "version": "1",
+  "description": "Hand-written eye-domain interview cases. Each `turns` entry is one patient message, played in order through orchestrator.interview.run_turn; `expect` is checked after the LAST turn, `expect_urgency_after` (when present) after that 0-based turn index. Synthetic throughout -- no real patient data (CONTRIBUTING.md: never commit PHI).",
+  "cases": [
+    {
+      "id": "eye_gradual_redness",
+      "domain": "eye",
+      "description": "Ordinary gradual-onset redness. The baseline routine case.",
+      "turns": [
+        "چند روزی است چشم راستم قرمز شده و کمی می‌سوزد.",
+        "از سه روز پیش، کم‌کم بدتر شد.",
+        "دیدم مشکلی ندارد."
+      ],
+      "expect": {
+        "domain": "eye",
+        "urgency": "routine",
+        "slots": {"redness": "yes"},
+        "complete": true
+      }
+    },
+    {
+      "id": "eye_sudden_vision_loss",
+      "domain": "eye",
+      "description": "The emergency pattern: sudden loss of vision. Urgency must be urgent by the end even if the model itself says routine -- postcheck escalates it.",
+      "turns": [
+        "چشم چپم قرمز شده.",
+        "از دیشب یک‌دفعه شروع شد.",
+        "دیدم را تقریباً از دست داده‌ام و چیزی نمی‌بینم."
+      ],
+      "expect": {
+        "domain": "eye",
+        "urgency": "urgent",
+        "slots": {"vision_change": "sudden_loss", "onset": "sudden"},
+        "complete": true
+      },
+      "expect_urgency_after": {"2": "urgent"}
+    },
+    {
+      "id": "eye_blurred_vision_only",
+      "domain": "eye",
+      "description": "Blurred vision without redness -- a real answer that is a negative. Checks that 'قرمز نیست' records a 'no', not a 'yes'.",
+      "turns": [
+        "دید چشمم تار شده است.",
+        "از حدود یک هفته پیش، تدریجی.",
+        "نه، چشمم قرمز نیست."
+      ],
+      "expect": {
+        "domain": "eye",
+        "urgency": "routine",
+        "slots": {"vision_change": "blurred", "onset": "gradual", "redness": "no"},
+        "complete": true
+      }
+    },
+    {
+      "id": "eye_trauma_sudden",
+      "domain": "eye",
+      "description": "Sudden onset after an impact, with vision loss. Second escalation path.",
+      "turns": [
+        "توپ محکم به چشمم خورد.",
+        "همین یک ساعت پیش، ناگهانی.",
+        "چشمم خیلی قرمز است و دیدم کم شده."
+      ],
+      "expect": {
+        "domain": "eye",
+        "urgency": "urgent",
+        "slots": {"onset": "sudden", "redness": "yes", "vision_change": "decreased"},
+        "complete": true
+      }
+    },
+    {
+      "id": "eye_short_answers",
+      "domain": "eye",
+      "description": "Terse one-word replies -- the case where a keyword-only extractor would stall and the positional fallback has to carry the interview.",
+      "turns": [
+        "چشمم درد می‌کند.",
+        "دیروز",
+        "بله قرمز است",
+        "خیر، دیدم خوب است"
+      ],
+      "expect": {
+        "domain": "eye",
+        "complete": true
+      }
+    },
+    {
+      "id": "general_no_domain_match",
+      "domain": "general",
+      "description": "Nothing eye-related. Must fall back to the general domain rather than forcing an eye interview.",
+      "turns": [
+        "از دیروز سرم خیلی درد می‌کند."
+      ],
+      "expect": {
+        "domain": "general",
+        "urgency": "routine",
+        "complete": false
+      }
+    },
+    {
+      "id": "eye_domain_sticks_across_turns",
+      "domain": "eye",
+      "description": "Only the first message names the eye; later ones carry no keyword at all. The conversation must stay in the eye domain.",
+      "turns": [
+        "چشمم اذیت می‌کند.",
+        "از دو روز پیش",
+        "بله",
+        "نه"
+      ],
+      "expect": {
+        "domain": "eye",
+        "complete": true
+      }
+    },
+    {
+      "id": "eye_empty_turn",
+      "domain": "eye",
+      "description": "A blank message mid-interview. precheck must reject the turn without losing what was already collected.",
+      "turns": [
+        "چشم راستم از دیروز قرمز شده.",
+        "   "
+      ],
+      "expect": {
+        "domain": "eye",
+        "slots": {"redness": "yes"}
+      },
+      "expect_failure_on_turn": 1
+    }
+  ]
+}

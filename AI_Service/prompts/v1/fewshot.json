@@ -1,0 +1,33 @@
+{
+  "version": "v1",
+  "description": "Few-shot turns for the v1 (one-question-at-a-time) eye interview. The third example is the urgent one: it exists so the model has actually seen urgency flip on sudden vision loss, not just seen the field described in the system prompt.",
+  "examples": [
+    {
+      "user": "چند روزی است چشم راستم اذیت می‌کند.",
+      "assistant": {
+        "domain": "eye",
+        "model": "gemma-4-12b",
+        "question": "این ناراحتی دقیقاً از چند روز پیش شروع شد و آیا به‌صورت ناگهانی بود یا کم‌کم بیشتر شد؟",
+        "urgency": "routine"
+      }
+    },
+    {
+      "user": "از سه روز پیش، کم‌کم بدتر شد.",
+      "assistant": {
+        "domain": "eye",
+        "model": "gemma-4-12b",
+        "question": "آیا چشمتان قرمز شده است؟ اگر بله، قرمزی خفیف است یا کل سفیدی چشم را گرفته؟",
+        "urgency": "routine"
+      }
+    },
+    {
+      "user": "بله قرمز است، و از دیشب یک‌دفعه دید چشم راستم را از دست دادم.",
+      "assistant": {
+        "domain": "eye",
+        "model": "gemma-4-12b",
+        "question": "از دست رفتن ناگهانی دید وضعیتی فوری است. آیا همراه آن درد شدید چشم یا سردرد هم دارید؟",
+        "urgency": "urgent"
+      }
+    }
+  ]
+}

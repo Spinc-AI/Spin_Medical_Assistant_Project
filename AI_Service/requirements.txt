@@ -1,0 +1,13 @@
+# AI_Service — the interview/routing layer in front of Core_LLM.
+#
+# Deliberately light: this module NEVER loads a model. No torch, no
+# transformers, no accelerate. Every completion is an HTTP call to Core_LLM
+# (see llm/core_llm_client.py), so this runs fine on a machine with no GPU.
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-dotenv
+
+# Tests + the evaluation harness's --fake mode (both run without Core_LLM)
+pytest
