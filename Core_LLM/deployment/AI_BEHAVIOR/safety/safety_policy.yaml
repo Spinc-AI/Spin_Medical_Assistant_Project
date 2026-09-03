@@ -1,0 +1,24 @@
+version: v1
+
+pre_check:
+  enabled: true
+  source: red_flags.yaml
+  on_match:
+    action: trigger_emergency_response
+    skip_ordinary_questioning: true
+
+llm_stage:
+  description: در صورت عبور از pre-check، ورودی طبق system prompt به مدل انتخابی ارسال می‌شود.
+
+post_check:
+  enabled: true
+  rules:
+    - rule: no_definitive_diagnosis
+    - rule: no_unnecessary_questions_in_emergency
+    - rule: recommend_professional_care
+
+escalation:
+  emergency_conditions_source: red_flags.yaml
+  safe_response_policy: >
+    در شرایط اورژانسی، پاسخ باید کوتاه، واضح، و بدون سؤال اضافه باشد و
+    بیمار را به اقدام فوری هدایت کند.

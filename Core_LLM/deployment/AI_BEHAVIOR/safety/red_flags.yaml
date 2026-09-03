@@ -1,0 +1,32 @@
+red_flags:
+  - condition: respiratory_distress
+    keywords:
+      - "نفس نمی‌تونم بکشم"
+      - "نفسم بالا نمیاد"
+      - "تنگی نفس شدید"
+    escalation: emergency
+
+  - condition: chest_pain
+    keywords:
+      - "درد شدید قفسه سینه"
+      - "قفسه سینه‌ام درد می‌کنه و فشار دارم"
+    escalation: emergency
+
+  - condition: severe_bleeding
+    keywords:
+      - "خونریزی شدید"
+      - "خونریزی بند نمیاد"
+    escalation: emergency
+
+  - condition: loss_of_consciousness
+    keywords:
+      - "بیهوش شدم"
+      - "از حال رفتم"
+    escalation: emergency
+
+  - condition: stroke_signs
+    keywords:
+      - "نصف صورتم فلج شده"
+      - "نمی‌تونم حرف بزنم"
+      - "یک طرف بدنم بی‌حس شده"
+    escalation: emergency

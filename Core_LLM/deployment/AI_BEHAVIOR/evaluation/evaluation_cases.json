@@ -1,0 +1,6 @@
+[
+  {"id": "eye_001", "domain": "eye", "input": "چشمم درد می‌کنه", "expected_behavior": "ask_relevant_followup"},
+  {"id": "hand_001", "domain": "musculoskeletal", "input": "دستم درد می‌کنه", "expected_behavior": "ask_relevant_followup"},
+  {"id": "emergency_001", "domain": "emergency", "input": "نفس نمی‌تونم بکشم", "expected_behavior": "trigger_emergency_response"},
+  {"id": "ambiguous_001", "domain": "general", "input": "حالم زیاد خوب نیست", "expected_behavior": "ask_clarifying_question"}
+]
