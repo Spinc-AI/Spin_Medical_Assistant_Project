@@ -19,6 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import config
 from model import MANAGER
 from schemas import ChatRequest, ChatResponse, HealthResponse
+from AI_BEHAVIOR.routing.router import Router
+
+ROUTER = Router()
+EMERGENCY_MESSAGE = (
+    "این وضعیت می‌تونه اورژانسی باشه. لطفاً همین الان با اورژانس (115) تماس بگیرید "
+    "یا به نزدیک‌ترین مرکز درمانی مراجعه کنید."
+)
 
 app = FastAPI(title="Core LLM Service")
 
@@ -44,8 +51,23 @@ def list_models():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """Send chat messages (OpenAI format) and get the assistant's full reply."""
-    key = req.model or config.DEFAULT_MODEL
+    """Send chat messages (OpenAI format) and get the assistant's full reply.
+
+    If `model` isn't given, the AI_BEHAVIOR router picks one automatically
+    based on the domain detected in the patient's last message.
+    """
+    key = req.model
+    if key is None:
+        last_user_text = ""
+        for m in reversed(req.messages):
+            if m.role == "user":
+                last_user_text = m.content
+                break
+        route_result = ROUTER.route_complaint(last_user_text)
+        if route_result["domain"] == "emergency":
+            return ChatResponse(model="safety-engine", reply=EMERGENCY_MESSAGE)
+        key = route_result["selected_model"] or config.DEFAULT_MODEL
+
     messages = [m.model_dump() for m in req.messages]
     try:
         reply = await run_in_threadpool(
@@ -57,7 +79,6 @@ async def chat(req: ChatRequest):
     except Exception as exc:  # model load/generation error
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
     return ChatResponse(model=key, reply=reply)
-
 
 @app.post("/unload")
 async def unload(model: str | None = None):

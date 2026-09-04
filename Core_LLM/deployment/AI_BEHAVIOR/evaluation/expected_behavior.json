@@ -1,0 +1,5 @@
+{
+  "ask_relevant_followup": {"description": "مدل باید سؤال تکمیلی مرتبط بپرسد.", "example": "آیا چشم شما قرمز شده؟"},
+  "ask_clarifying_question": {"description": "وقتی ورودی مبهم است، سؤال شفاف‌کننده بپرسد.", "example": "دقیق‌تر بگید کجا درد دارید؟"},
+  "trigger_emergency_response": {"description": "در صورت red flag، مستقیم به اقدام فوری هدایت کند.", "example": "با اورژانس (115) تماس بگیرید."}
+}

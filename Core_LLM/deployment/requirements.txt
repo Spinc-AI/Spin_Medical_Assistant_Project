@@ -20,3 +20,4 @@ transformers        # needs a version with Gemma4 (AutoModelForMultimodalLM) AND
 accelerate           # for device_map="auto"
 soundfile
 librosa
+pyyaml

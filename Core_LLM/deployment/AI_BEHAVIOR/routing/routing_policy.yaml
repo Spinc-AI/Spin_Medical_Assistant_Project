@@ -1,0 +1,20 @@
+version: v1
+description: baseline policy - انتخاب مدل بر اساس دامنه، قبل از evaluation واقعی
+
+routes:
+  eye:
+    preferred_model: gemma-4-12b
+  musculoskeletal:
+    preferred_model: aya-expanse-8b
+  respiratory:
+    preferred_model: aya-expanse-8b
+  headache:
+    preferred_model: aya-expanse-8b
+  gastrointestinal:
+    preferred_model: aya-expanse-8b
+  skin:
+    preferred_model: aya-expanse-8b
+  general:
+    preferred_model: aya-expanse-8b
+  emergency:
+    preferred_model: null
